@@ -4,7 +4,7 @@
 conda activate varcall
 
 # remove the final vcf header lines that are not needed for PCGR annotation
-mutect2_dir="/home/zhonggr/projects/250224_DFSP_WES/data/wes/mutect2"
+mutect2_dir="/mnt/f/projects/250224_DFSP_Multiomics/data/wes/mutect2"
 
 sample_list=$(ls "${mutect2_dir}")
 echo "Sample list: ${sample_list}"
@@ -46,6 +46,8 @@ done
 vcf_old=/home/zhonggr/projects/250224_DFSP_WES/data/wes/mutect2_old/DFSP-001-T/DFSP-001-T.final.vcf.gz
 vcf_new=/home/zhonggr/projects/250224_DFSP_WES/data/wes/mutect2/DFSP-001-T/DFSP-001-T.final.vcf.gz
 vcf_cleaned=/home/zhonggr/projects/250224_DFSP_WES/data/wes/mutect2/DFSP-001-T/DFSP-001-T.final.cleaned.vcf.gz
+
+vcf_new=/mnt/f/projects/250224_DFSP_Multiomics/data/wes/mutect2/DFSP-052-T/DFSP-052-T.final.vcf.gz
 
 
 bcftools view -h "${vcf_old}" | grep "##INFO"

@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name=Test_NF
 #SBATCH --partition=amd
-#SBATCH --time=96:00:00
+#SBATCH --time=8:00:00
 #SBATCH --qos=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem-per-cpu=4G
-#SBATCH --output=/home/zhonggr/projects/250224_DFSP_WES/slurm/%x_%j.out
-#SBATCH --output=/home/zhonggr/projects/250224_DFSP_WES/slurm/%x_%j.err
+#SBATCH --output=/home/zhonggr/projects/250224_DFSP_Multiomics/slurm/%x_%j.out
+#SBATCH --error=/home/zhonggr/projects/250224_DFSP_Multiomics/slurm/%x_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=zhonggr@hku.hk
 
@@ -20,7 +20,7 @@ conda activate varcall
 export ref_dir="/home/zhonggr/projects/250224_DFSP_WES/data/reference"
 export bam_dir="/home/zhonggr/projects/250224_DFSP_WES/data/wes/preprocessing/recalibrated"
 export vcf_dir="/home/zhonggr/projects/250224_DFSP_WES/data/wes/variant_calling/mutect2"
-export work_dir="/home/zhonggr/projects/250224_DFSP_WES/data/wes/variant_calling/mutect2_tumour_normal"
+export work_dir="/home/zhonggr/projects/250224_DFSP_WES/data/wes/variant_calling/mutect2_tumour_only"
 mkdir -p ${work_dir}
 
 # Define reference files
@@ -29,6 +29,10 @@ export GERMLINE=${ref_dir}/Population_database/somatic-hg38_af-only-gnomad.hg38.
 export ANNOTATION_FILE=${ref_dir}/Funocator_Datasource/funcotator_dataSources.v1.7.20200521s/
 export INTERVAL=${ref_dir}/Exome/xgen-exome-hyb-panel-v2-hg38_200bp_sorted_merged/xgen-exome-hyb-panel-v2-hg38_200bp_sorted_merged.bed
 export PON=${ref_dir}/pon_dfsp/pon.vcf.gz
+
+# Create header files needed for repeatmasker and blacklist annotation
+echo -e "##INFO=<ID=RepeatMasker,Number=1,Type=String,Description=\"RepeatMasker\">" > ${work_dir}/vcf.rm.header
+echo -e "##INFO=<ID=EncodeDacMapability,Number=1,Type=String,Description=\"EncodeDacMapability\">" > ${work_dir}/vcf.map.header
 
 echo "Reference directory:  ${ref_dir}"
 echo "Bam directory:        ${bam_dir}"
@@ -63,80 +67,46 @@ mutect_call_filter() {
     mkdir -p ${work_dir}/${tumour_id}
     VAROUT=${work_dir}/${tumour_id}
     
-    # Get Pileup Summaries
-    echo $(date +"%F") $(date +"%T") "Getting Pileup Summaries of tumour sample ..."
-    gatk GetPileupSummaries \
-        -I $bam_dir/$tumour_id/${tumour_id}_recalibrated.bam \
-        -V ${ref_dir}/GetPileupSummary/small_exac_common_3.hg38.vcf.gz \
-        -L ${ref_dir}/GetPileupSummary/small_exac_common_3.hg38.vcf.gz \
-        -O ${VAROUT}/${tumour_id}.getpileupsummaries.table
+    # # Get Pileup Summaries
+    # echo $(date +"%F") $(date +"%T") "Getting Pileup Summaries of tumour sample ..."
+    # gatk GetPileupSummaries \
+    #     -I $bam_dir/$tumour_id/${tumour_id}_recalibrated.bam \
+    #     -V ${ref_dir}/GetPileupSummary/small_exac_common_3.hg38.vcf.gz \
+    #     -L ${ref_dir}/GetPileupSummary/small_exac_common_3.hg38.vcf.gz \
+    #     -O ${VAROUT}/${tumour_id}.getpileupsummaries.table
 
-    #Check if presence of paired normal samples
-    if [ -d ${bam_dir}/${normal_id} ]; then
-        echo $(date +"%F") $(date +"%T") "Getting Pileup Summaries of normal sample ..."
-        gatk GetPileupSummaries \
-            -I $bam_dir/$normal_id/${normal_id}_recalibrated.bam \
-            -V ${ref_dir}/GetPileupSummary/small_exac_common_3.hg38.vcf.gz \
-            -L ${ref_dir}/GetPileupSummary/small_exac_common_3.hg38.vcf.gz \
-            -O ${VAROUT}/${normal_id}.getpileupsummaries.table
-
-        # Calculate contamination on paired samples
-        echo $(date +"%F") $(date +"%T") "Calculating contamination of paired samples ..."
-        gatk CalculateContamination \
-            -I ${VAROUT}/${tumour_id}.getpileupsummaries.table \
-            -matched ${VAROUT}/${normal_id}.getpileupsummaries.table \
-            -O ${VAROUT}/${tumour_id}.contamination.table \
-            -segments ${VAROUT}/${tumour_id}.segments.table
-
-        # Call variant on paired tumour samples
-        echo $(date +"%F") $(date +"%T") "Calling somatic variants on paired samples ...";
-        gatk --java-options -Xmx8g Mutect2 \
-            -I $bam_dir/${tumour_id}/${tumour_id}_recalibrated.bam \
-            -I $bam_dir/${normal_id}/${normal_id}_recalibrated.bam \
-            -normal $normal_id \
-            -R $REFERENCE \
-            -L $INTERVAL \
-            --germline-resource $GERMLINE  \
-            --panel-of-normals $PON \
-            --f1r2-tar-gz ${VAROUT}/${tumour_id}.f1r2.tar.gz \
-            --native-pair-hmm-threads 8 \
-            --callable-depth 20 \
-            -O ${VAROUT}/${tumour_id}.mutect2.vcf.gz \
-            -bamout ${VAROUT}/${tumour_id}.realigned.bam \
-            >& ${VAROUT}/${tumour_id}.mutect2.log
-    else
-        # Calculate contamination based on tumour samples only
-        echo $(date +"%F") $(date +"%T") "Calculating contamination of tumour-only samples ..."
-        gatk CalculateContamination \
-            -I ${VAROUT}/${tumour_id}.getpileupsummaries.table \
-            -O ${VAROUT}/${tumour_id}.contamination.table \
-            -segments ${VAROUT}/${tumour_id}.segments.table
-        
-        # Mutect2 call variant on unpaired tumour samples
-        echo $(date +"%F") $(date +"%T") "Calling somatic variants on unpaired samples ...";
-        gatk --java-options -Xmx8g Mutect2 \
-            -I $bam_dir/${tumour_id}/${tumour_id}_recalibrated.bam \
-            -R $REFERENCE \
-            -L $INTERVAL \
-            --germline-resource $GERMLINE  \
-            --panel-of-normals $PON \
-            --f1r2-tar-gz ${VAROUT}/${tumour_id}.f1r2.tar.gz \
-            --callable-depth 20 \
-            -O ${VAROUT}/${tumour_id}.mutect2.vcf.gz \
-            -bamout ${VAROUT}/${tumour_id}.realigned.bam \
-            >& ${VAROUT}/${tumour_id}.mutect2.log
-    fi
+    # # Calculate contamination based on tumour samples only
+    # echo $(date +"%F") $(date +"%T") "Calculating contamination of tumour-only samples ..."
+    # gatk CalculateContamination \
+    #     -I ${VAROUT}/${tumour_id}.getpileupsummaries.table \
+    #     -O ${VAROUT}/${tumour_id}.contamination.table \
+    #     -segments ${VAROUT}/${tumour_id}.segments.table
+    
+    # # Mutect2 call variant on unpaired tumour samples
+    # echo $(date +"%F") $(date +"%T") "Calling somatic variants on unpaired samples ...";
+    # gatk --java-options -Xmx8g Mutect2 \
+    #     -I $bam_dir/${tumour_id}/${tumour_id}_recalibrated.bam \
+    #     -R $REFERENCE \
+    #     -L $INTERVAL \
+    #     --germline-resource $GERMLINE  \
+    #     --panel-of-normals $PON \
+    #     --f1r2-tar-gz ${VAROUT}/${tumour_id}.f1r2.tar.gz \
+    #     --callable-depth 20 \
+    #     -O ${VAROUT}/${tumour_id}.mutect2.vcf.gz \
+    #     -bamout ${VAROUT}/${tumour_id}.realigned.bam \
+    #     >& ${VAROUT}/${tumour_id}.mutect2.log
 
     # Learn Read Orientation Model bias for FFPE artifacts
     gatk LearnReadOrientationModel \
-        -I ${VAROUT}/${tumour_id}/${tumour_id}.f1r2.tar.gz \
-        -O ${VAROUT}/${tumour_id}.readorientationmodel.tar.gz
+        -I ${VAROUT}/${tumour_id}.f1r2.tar.gz \
+        -O ${VAROUT}/${tumour_id}.readorientationmodel.tar.gz \
+        >& ${VAROUT}/${tumour_id}.learnreadorientationmodel.log
 
     # Filter Mutect calls
     echo $(date +"%F") $(date +"%T") "Filtering Mutect calls ..."
     gatk --java-options -Xmx4g FilterMutectCalls \
-        --variant ${VAROUT}/${tumour_id}/${tumour_id}.mutect2.vcf.gz \
-        --stats ${VAROUT}/${tumour_id}/${tumour_id}.mutect2.vcf.gz.stats \
+        --variant ${VAROUT}/${tumour_id}.mutect2.vcf.gz \
+        --stats ${VAROUT}/${tumour_id}.mutect2.vcf.gz.stats \
         --reference $REFERENCE \
         --ob-priors $VAROUT/${tumour_id}.readorientationmodel.tar.gz \
         --contamination-table $VAROUT/${tumour_id}.contamination.table \
@@ -160,11 +130,30 @@ mutect_call_filter() {
         -o ${VAROUT}/${tumour_id}.passed.vcf.gz
 
     # Annotate repeatmasker and blacklist regions
+    
+    # Sort and index RepeatMasker file if needed
+    if [ ! -f "${ref_dir}/RepeatMasker.bed.gz.tbi" ]; then
+        echo "Sorting and indexing RepeatMasker file..."
+        zcat ${ref_dir}/RepeatMasker.bed.gz | \
+        sort -k1,1 -k2,2n | \
+        bgzip > ${ref_dir}/RepeatMasker.sorted.bed.gz
+        tabix -p bed ${ref_dir}/RepeatMasker.sorted.bed.gz
+    fi
+    
+    # Sort and index blacklist file if needed  
+    if [ ! -f "${ref_dir}/blacklist.bed.gz.tbi" ]; then
+        echo "Sorting and indexing blacklist file..."
+        zcat ${ref_dir}/blacklist.bed.gz | \
+        sort -k1,1 -k2,2n | \
+        bgzip > ${ref_dir}/blacklist.sorted.bed.gz
+        tabix -p bed ${ref_dir}/blacklist.sorted.bed.gz
+    fi
+
     echo $(date +"%F") $(date +"%T") "Annotating repeatmasker regions ..."
     bcftools annotate \
         ${VAROUT}/${tumour_id}.passed.vcf.gz \
         --header-lines ${work_dir}/vcf.rm.header \
-        --annotations ${ref_dir}/RepeatMasker.bed.gz \
+        --annotations ${ref_dir}/RepeatMasker.sorted.bed.gz \
         --columns CHROM,FROM,TO,RepeatMasker \
         --output ${VAROUT}/${tumour_id}.repeatmasker.vcf.gz
 
@@ -172,7 +161,7 @@ mutect_call_filter() {
     bcftools annotate \
         ${VAROUT}/${tumour_id}.repeatmasker.vcf.gz \
         --header-lines ${work_dir}/vcf.map.header \
-        --annotations ${ref_dir}/blacklist.bed.gz \
+        --annotations ${ref_dir}/blacklist.sorted.bed.gz \
         --columns CHROM,FROM,TO,EncodeDacMapability \
         --output-type z \
         --output ${VAROUT}/${tumour_id}.blacklist.vcf.gz
@@ -240,9 +229,6 @@ mutect_call_filter() {
 # Export function to make it available to GNU parallel
 export -f mutect_call_filter
 
-# Create header files needed for repeatmasker and blacklist annotation
-echo -e "##INFO=<ID=RepeatMasker,Number=1,Type=String,Description=\"RepeatMasker\">" > ${work_dir}/vcf.rm.header
-echo -e "##INFO=<ID=EncodeDacMapability,Number=1,Type=String,Description=\"EncodeDacMapability\">" > ${work_dir}/vcf.map.header
 
 # Get list of tumor samples to process
 # You can customize this part based on how you want to identify samples
@@ -250,22 +236,23 @@ echo -e "##INFO=<ID=EncodeDacMapability,Number=1,Type=String,Description=\"Encod
 # tumour_ids="DFSP-028-T DFSP-029-T DFSP-030-T-P1"
 
 # Example 2: Find all tumor samples from the vcf directory
-find "$vcf_dir" -name "*_unfiltered.vcf.gz" | sort | sed 's|.*/||' | sed 's/_unfiltered.vcf.gz$//' > "${work_dir}/sample_list.txt"
+# find "$vcf_dir" -name "*_unfiltered.vcf.gz" | sort | sed 's|.*/||' | sed 's/_unfiltered.vcf.gz$//' > "${work_dir}/sample_list.txt"
 # find "$bam_dir" -name "*_recalibrated.bam" | sort | sed 's|.*/||' | sed 's/_recalibrated.bam$//' > "${work_dir}/sample_list.txt"
 # cat "${work_dir}/sample_list.txt"
 
 # Number of parallel processes to run (adjust based on your system's capacity)
-PARALLEL_JOBS=30
+sample_list=/home/zhonggr/projects/250224_DFSP_WES/data/wes/sample_info/tumour_all_samples.txt
+
+PARALLEL_JOBS=25
 
 # Run the processing in parallel
 echo "Starting parallel processing of samples with $PARALLEL_JOBS jobs..."
-cat "${work_dir}/sample_list.txt" | parallel \
+cat "${sample_list}" | parallel \
     --jobs $PARALLEL_JOBS \
     --progress \
     --joblog ${work_dir}/parallel.log \
     mutect_call_filter {} "$ref_dir" "$bam_dir" "$vcf_dir" "$work_dir" "$REFERENCE" "$GERMLINE" "$ANNOTATION_FILE" "$INTERVAL" "$PON"
 
+# rm ${work_dir}/vcf.rm.header
+# rm ${work_dir}/vcf.map.header
 echo "All samples processed successfully."
-rm ${work_dir}/sample_list.txt
-rm ${work_dir}/vcf.rm.header
-rm ${work_dir}/vcf.map.header

@@ -12,17 +12,17 @@ output_tsv=/mnt/m/WES/SARC/CNV-call/facets/SARC-022-T/SARC-022-T.tsv
 zgrep "^#CHROM" ${input_vcf}
 
 ## View INFO column of VCF
-# echo "Showing INFO column sample from VCF file:"
-# zcat ${input_vcf} | grep -v "^#" | head -5 | cut -f 8
+echo "Showing INFO column sample from VCF file:"
+zcat ${input_vcf} | grep -v "^#" | head -5 | cut -f 8
 
-# ## Alternative using bcftools (if installed)
-# if command -v bcftools &> /dev/null; then
-#     echo "INFO fields and descriptions:"
-#     bcftools view -h ${input_vcf} | grep "^##INFO"
+## Alternative using bcftools (if installed)
+if command -v bcftools &> /dev/null; then
+    echo "INFO fields and descriptions:"
+    bcftools view -h ${input_vcf} | grep "^##INFO"
     
-#     echo "Sample INFO column values:"
-#     bcftools query -f '%INFO\n' ${input_vcf} | head -5
-# fi
+    echo "Sample INFO column values:"
+    bcftools query -f '%INFO\n' ${input_vcf} | head -5
+fi
 
 ## Check if input VCF file exists
 if [[ ! -f ${input_vcf} ]]; then

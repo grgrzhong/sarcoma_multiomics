@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=PCGR_Annotation
+#SBATCH --job-name=pcgr_annotation
 #SBATCH --partition=amd
 #SBATCH --time=2:00:00
 #SBATCH --qos=normal
@@ -7,8 +7,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem-per-cpu=4G
-#SBATCH --output=/home/zhonggr/projects/250224_DFSP_WES/slurm/%x_%j.out
-#SBATCH --error=/home/zhonggr/projects/250224_DFSP_WES/slurm/%x_%j.err
+#SBATCH --output=/home/zhonggr/projects/250224_DFSP_Multiomics/slurm/%x_%j.out
+#SBATCH --error=/home/zhonggr/projects/250224_DFSP_Multiomics/slurm/%x_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=zhonggr@hku.hk
 
@@ -20,30 +20,71 @@
 ## Key features: 1. Added prallelization; 2. Use singularity container
 ## "==========================================================================="
 
-## Project settings
-export project_dir="/mnt/f/projects/250224_DFSP_WES"
-export module_dir="${project_dir}/bin"
-export bam_dir="${project_dir}/data/wes/bam"
-export mutect2_dir="${project_dir}/data/wes/mutect2"
-
-## Reference settings
+## ===========================================================================
+## Enable and modify this if runing at local environment
+## ===========================================================================
+export project_dir="/mnt/f/projects/250224_DFSP_Multiomics"
 export ref_dir="/mnt/m/Reference"
+
+## ===========================================================================
+## Enable and modify this if runing at HPC environment
+## ===========================================================================
+# export project_dir="/lustre1/g/path_my/250224_DFSP_Multiomics"
+# export ref_dir="/lustre1/g/path_my/Reference"
+
+## ===========================================================================
+## General configurations
+## ===========================================================================
+export module_dir="${project_dir}/scripts/modules"
+export bam_dir="${project_dir}/data/wes/bam"
+export vcf_dir="${project_dir}/data/wes/mutect2"
+export cna_dir="${project_dir}/data/wes/cnv_facets"
+export rna_dir="${project_dir}/data/rna"
+
 export ref_data_dir="${ref_dir}/PCGR_reference/20250314"
 export vep_dir="${ref_dir}/VEP_cache"
-export panel_of_normals="${ref_dir}/WES/DFSP/PON-Mutect/pon.vcf.gz"
+export panel_of_normals_original="/mnt/m/WES/DFSP/PON-Mutect/pon.vcf.gz"
+export panel_of_normals="/mnt/m/WES/DFSP/PON-Mutect/pon_pcgr.vcf.gz"
 
-## Download PCGR singularity container if not already present
-container_dir="${project_dir}/containers"
-singularity pull --force --dir ${container_dir} pcgr-2.2.1.sif oras://ghcr.io/sigven/pcgr:2.2.1.singularity
+## Create PCGR-compatible PoN if it doesn't exist
+if [ ! -f "${panel_of_normals}" ]; then
+    echo "Creating PCGR-compatible PoN VCF..."
+    { 
+        bcftools view -h "${panel_of_normals_original}" | head -n -1
+        echo '##INFO=<ID=PANEL_OF_NORMALS,Number=0,Type=Flag,Description="Overlap with germline call among panel of normals">'
+        bcftools view -h "${panel_of_normals_original}" | tail -n 1
+        bcftools view -H "${panel_of_normals_original}" | awk 'BEGIN{OFS="\t"} {
+            if ($8 == ".") {
+                $8 = "PANEL_OF_NORMALS"
+            } else {
+                $8 = $8 ";PANEL_OF_NORMALS"
+            }
+            print $0
+        }'
+    } | bgzip > "${panel_of_normals}" && tabix -p vcf "${panel_of_normals}"
+    echo "PCGR-compatible PoN created: ${panel_of_normals}"
+fi
+
+# bcftools view -h "${panel_of_normals}" | grep -i "^##"
+# bcftools view -h "${panel_of_normals}" | head -20
+# bcftools view -h "${panel_of_normals}" | grep -i "^#CHROM"
+# bcftools view -h "${panel_of_normals_original}" | grep -i "^##"
 
 ## Output directory for PCGR results
-work_dir="${project_dir}/data/wes/PCGR"
+# work_dir="${project_dir}/data/wes/pcgr"
+work_dir="${project_dir}/outputs/pcgr_test"
+mkdir -p "${work_dir}"
 
-## Sample list to run PCGR annotation
-sample_list=$(ls $mutect2_dir)
+## tumour sample list
+tumour_all_samples="${project_dir}/data/wes/sample_info/tumour_all_samples.txt"
+
+# sample_list=$(ls $vcf_dir)
+sample_list=${tumour_all_samples}
+# cat ${sample_list}
 
 ## Parallel jobs
-num_sample=$(echo "${sample_list}" | wc -l)
+num_sample=$(wc -l < "${sample_list}")
+
 if [ "${num_sample}" -ge 15 ]; then    
     jobs=15
 else
@@ -52,13 +93,15 @@ fi
 
 ## Print the configuration
 echo "===================================================================="
+echo "project_dir:             ${project_dir}"
 echo "work_dir:                ${work_dir}"
-echo "mutect2_dir:             ${mutect2_dir}"
+echo "vcf_dir:                 ${vcf_dir}"
+echo "vcf_dir:                 ${cna_dir}"
 echo "bam_dir:                 ${bam_dir}"
+echo "container_dir:           ${container_dir}"
 echo "ref_data_dir:            ${ref_data_dir}"
 echo "vep_dir:                 ${vep_dir}"
 echo "panel_of_normals:        ${panel_of_normals}"
-echo "container_dir:           ${container_dir}"
 echo "Number of samples:       ${num_sample}"
 echo "Number of parallel jobs: ${jobs}"
 echo "===================================================================="
@@ -70,13 +113,15 @@ echo "===================================================================="
 ## Function to run PCGR annotation
 pcgr_annotation() {
     local tumour_id=$1
-    local mutect2_dir=$2
-    local bam_dir=$3
-    local ref_data_dir=$4
-    local vep_dir=$5
-    local work_dir=$6
-    local panel_of_normals=$7
-    local container_dir=$8
+    local vcf_dir=$2
+    local cna_dir=$3
+    local rna_dir=$4
+    local bam_dir=$5
+    local ref_data_dir=$6
+    local vep_dir=$7
+    local work_dir=$8
+    local panel_of_normals=$9
+    local container_dir=${10}
 
     ## Find the matched normal sample
     patient_id=$(echo "${tumour_id}" | cut -d'-' -f1,2)
@@ -92,13 +137,19 @@ pcgr_annotation() {
     fi
 
     ## Check if input VCF exists
-    input_vcf="${mutect2_dir}/${tumour_id}/${tumour_id}.final.vcf.gz"
+    input_vcf="${vcf_dir}/${tumour_id}/${tumour_id}.final.vcf.gz"
 
     if [ ! -f "${input_vcf}" ]; then
         echo "Input VCF not found: ${input_vcf}"
         return 1
     fi
     
+    input_cna="${cna_dir}/${tumour_id}/${tumour_id}.pcgr.tsv"
+    if [ ! -f "${input_cna}" ]; then
+        echo "Input CNA file not found: ${input_cna}"
+        return 1
+    fi
+
     ## Create output directory for this sample
     output_dir="${work_dir}/${tumour_id}"
     mkdir -p "${output_dir}"
@@ -115,7 +166,7 @@ pcgr_annotation() {
 
         ## Reformat VCF 
         singularity exec \
-            --bind "${mutect2_dir}:${mutect2_dir}" \
+            --bind "${vcf_dir}:${vcf_dir}" \
             --bind "${work_dir}:${work_dir}" \
             --bind "${output_dir}:${output_dir}" \
             --bind "${module_dir}:${module_dir}" \
@@ -142,6 +193,7 @@ pcgr_annotation() {
             "${container_dir}/pcgr-2.2.1.sif" \
             pcgr \
             --input_vcf "${reformatted_vcf}" \
+            --input_cna "${input_cna}" \
             --vep_dir "${vep_dir}" \
             --refdata_dir "${ref_data_dir}" \
             --output_dir "${output_dir}" \
@@ -176,7 +228,7 @@ pcgr_annotation() {
         
         ## Reformat VCF 
         singularity exec \
-            --bind "${mutect2_dir}:${mutect2_dir}" \
+            --bind "${vcf_dir}:${vcf_dir}" \
             --bind "${work_dir}:${work_dir}" \
             --bind "${output_dir}:${output_dir}" \
             --bind "${module_dir}:${module_dir}" \
@@ -203,6 +255,8 @@ pcgr_annotation() {
             "${container_dir}/pcgr-2.2.1.sif" \
             pcgr \
                 --input_vcf "${reformatted_vcf}" \
+                --input_cna "${input_cna}" \
+                --pon_vcf "${panel_of_normals}" \
                 --vep_dir "${vep_dir}" \
                 --refdata_dir "${ref_data_dir}" \
                 --output_dir "$output_dir" \
@@ -223,7 +277,7 @@ pcgr_annotation() {
                 --vcf2maf \
                 --ignore_noncoding \
                 --force_overwrite \
-                >& "${output_dir}/pcgr_annotation.log"
+                >& "${output_dir}/pcgr.log"
 
     fi
 }
@@ -231,9 +285,10 @@ pcgr_annotation() {
 export -f pcgr_annotation
 
 ## Run PCGR annotation in parallel
-echo "${sample_list}" | parallel \
+cat ${sample_list} | parallel \
     --jobs "${jobs}" \
     --progress \
-    pcgr_annotation {} "${mutect2_dir}" "${bam_dir}" "${ref_data_dir}" "${vep_dir}" "${work_dir}" "${panel_of_normals}" "${container_dir}"
+    -k \
+    pcgr_annotation {} "${vcf_dir}" "${cna_dir}" "${rna_dir}" "${bam_dir}" "${ref_data_dir}" "${vep_dir}" "${work_dir}" "${panel_of_normals}" "${container_dir}"
 
 echo "$(date +"%F") $(date +"%T")" "PCGR annotation completed for all samples."

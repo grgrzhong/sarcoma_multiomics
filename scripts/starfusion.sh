@@ -7,42 +7,20 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem-per-cpu=4G
-#SBATCH --output=/home/zhonggr/projects/250224_DFSP_WES/slurm/%x_%j.out
-#SBATCH --error=/home/zhonggr/projects/250224_DFSP_WES/slurm/%x_%j.err
+#SBATCH --output=/home/zhonggr/projects/250224_DFSP_Multiomics/slurm/%x_%j.out
+#SBATCH --error=/home/zhonggr/projects/250224_DFSP_Multiomics/slurm/%x_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=zhonggr@hku.hk
-
-##############################################################################
-## Run STAR-Fusion using nextflow
-##############################################################################
-## Setup the working directory
-# cd /home/zhonggr/projects/250224_DFSP_WES
-
-# Global nextflow configuration
-# export NXF_OFFLINE=true
-# export NXF_HOME=$HOME/.nextflow
-# export NXF_DISABLE_CHECK_LATEST=true
-# export NXF_OPTS="-Xms512m -Xmx8g"
-# export NXF_LOG_FILE="${PWD}/.nextflow.log"
-# export NXF_WORK="${PWD}/work"
-
-# echo ${NXF_WORK}
-# rm -f NXF_WORK
-# rm -f .nextflow.log*
-
-# # Run the Nextflow pipeline in local mode
-nextflow run workflows/rna_fusion.nf \
-    -profile local \
-    -resume
 
 ##############################################################################
 ## Run STAR-Fusion using Singularity
 ##############################################################################
 # Load the Singularity module
-input_trimmed_dir=/mnt/m/RNA-seq/STUMP/Input-trimmed
+input_trimmed_dir=/mnt/m/RNA-seq/clinical_rnaseq_june11/Input-trimmed
+# input_trimmed_dir=/mnt/m/RNA-seq/STUMP/Input-trimmed
 ref_dir=/mnt/m/Reference
-output_dir=/mnt/f/projects/250224_DFSP_WES/outputs/stump/STAR-Fusion
-singularity_dir=/home/zhonggr/projects/250224_DFSP_WES/containers
+output_dir=/mnt/f/projects/250224_DFSP_Multiomics/outputs/stump/STAR-Fusion
+singularity_dir=/home/zhonggr/projects/250224_DFSP_Multiomics/containers
 
 # singularity shell \
 #     --bind ${ref_dir}:${ref_dir} \
@@ -54,6 +32,7 @@ STARINDEX=${ref_dir}/Gencode/STAR_index/
 REFERENCE=${ref_dir}/Gencode/gencode.hg38.v36.primary_assembly.fa
 ANNOTATION=${ref_dir}/Gencode/gencode.v36.primary_assembly.annotation.gtf
 CTAT_RESOURCE_LIB=${ref_dir}/GRCh38_gencode_v33_CTAT_lib_Apr062020.plug-n-play/ctat_genome_lib_build_dir/
+# CTAT_RESOURCE_LIB=${ref_dir}/GRCh38_gencode_v37_CTAT_lib_Apr062020.plug-n-play/ctat_genome_lib_build_dir/
 
 # Check if input files exist
 input_files=$(ls ${input_trimmed_dir}/*.fastq.gz 2>/dev/null | grep "R1")
@@ -69,7 +48,7 @@ input_files=$(ls ${input_trimmed_dir}/*.fastq.gz 2>/dev/null | grep "R1")
 #         --examine_coding_effect \
 #         --denovo_reconstruct
 
-# file=/mnt/m/RNA-seq/STUMP/Input-trimmed/S25_trimmed_R1.fastq.gz
+file=/mnt/m/RNA-seq/STUMP/Input-trimmed/S25_trimmed_R1.fastq.gz
 
 for file in $(ls ${input_trimmed_dir}/*.fastq.gz | grep "R1"); do 
 
