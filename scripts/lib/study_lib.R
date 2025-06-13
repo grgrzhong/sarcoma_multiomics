@@ -1209,3 +1209,41 @@ FilterMergedMaf <- function(
     # Return the filtered maf
     return(maf_filter)
 }
+
+LoadDFSPGroupInfo <- function() {
+    
+    sample_groups <- list(
+        `U-DFSP` = c("Classic", "Myxoid", "Pigmented"),
+        `Pre_FST` = c(
+            "Pretransformed classic",
+            "Pretransformed myxoid",
+            "Paired classic",
+            "Paired myxoid"
+        ),
+        `Post_FST` = c(
+            "Posttransformed FST",
+            "Paired FST",
+            "Paired Pleomorphic"
+        ),
+        `FS_DFSP` = c("Unpaired FST")
+    )
+
+    sample_info <- LoadSampleInfo() |>
+        filter(Specimen.Class == "Tumour") |>
+        select(
+            Sample.ID, Diagnosis, Specimen.Class, Specimen.Nature, Histology.Nature,
+            Somatic.Status, purity, ploidy
+        ) |>
+        mutate(
+            sample_group = case_when(
+                Histology.Nature %in% sample_groups$`U-DFSP` ~ "U-DFSP",
+                Histology.Nature %in% sample_groups$`Pre_FST` ~ "Pre-FST",
+                Histology.Nature %in% sample_groups$`Post_FST` ~ "Post-FST",
+                Histology.Nature %in% sample_groups$`FS_DFSP` ~ "FS-DFSP",
+                TRUE ~ "Other"
+            )
+        ) |>
+        rename(Tumor_Sample_Barcode = Sample.ID)
+    
+    sample_info
+}

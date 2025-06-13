@@ -12,13 +12,16 @@
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=zhonggr@hku.hk
 
-## "==========================================================================="
-## PCGR Annotation (https://sigven.github.io/pcgr/index.html)
+###############################################################################
+## PCGR annotation reference (https://sigven.github.io/pcgr/index.html)
 ## Authors: Zhong Guorui
 ## Date: 2025-06-10
 ## Description: This script was adapted from "M:\Scripts\DNA analysis\PCGR_annotate.sh"
-## Key features: 1. Added prallelization; 2. Use singularity container
-## "==========================================================================="
+## Key features: 
+##      1. Added prallelization to run PCGR annotation for multiple samples; 
+##      2. Use singularity container to keep the environment consistent;
+###############################################################################
+
 
 ## ===========================================================================
 ## Enable and modify this if runing at local environment
@@ -36,6 +39,7 @@ export ref_dir="/mnt/m/Reference"
 ## General configurations
 ## ===========================================================================
 export module_dir="${project_dir}/scripts/modules"
+export container_dir="${project_dir}/containers"
 export bam_dir="${project_dir}/data/wes/bam"
 export vcf_dir="${project_dir}/data/wes/mutect2"
 export cna_dir="${project_dir}/data/wes/cnv_facets"
@@ -43,8 +47,9 @@ export rna_dir="${project_dir}/data/rna"
 
 export ref_data_dir="${ref_dir}/PCGR_reference/20250314"
 export vep_dir="${ref_dir}/VEP_cache"
-export panel_of_normals_original="/mnt/m/WES/DFSP/PON-Mutect/pon.vcf.gz"
-export panel_of_normals="/mnt/m/WES/DFSP/PON-Mutect/pon_pcgr.vcf.gz"
+export panel_of_normals_dir="/mnt/m/WES/DFSP/PON-Mutect"
+export panel_of_normals_original="${panel_of_normals_dir}/pon.vcf.gz"
+export panel_of_normals="${panel_of_normals_dir}/pon_pcgr.vcf.gz"
 
 ## Create PCGR-compatible PoN if it doesn't exist
 if [ ! -f "${panel_of_normals}" ]; then
@@ -72,7 +77,7 @@ fi
 
 ## Output directory for PCGR results
 # work_dir="${project_dir}/data/wes/pcgr"
-work_dir="${project_dir}/outputs/pcgr_test"
+work_dir="${project_dir}/data/pcgr_test"
 mkdir -p "${work_dir}"
 
 ## tumour sample list
@@ -96,7 +101,7 @@ echo "===================================================================="
 echo "project_dir:             ${project_dir}"
 echo "work_dir:                ${work_dir}"
 echo "vcf_dir:                 ${vcf_dir}"
-echo "vcf_dir:                 ${cna_dir}"
+echo "cna_dir:                 ${cna_dir}"
 echo "bam_dir:                 ${bam_dir}"
 echo "container_dir:           ${container_dir}"
 echo "ref_data_dir:            ${ref_data_dir}"
@@ -120,8 +125,9 @@ pcgr_annotation() {
     local ref_data_dir=$6
     local vep_dir=$7
     local work_dir=$8
-    local panel_of_normals=$9
-    local container_dir=${10}
+    local container_dir=${9}
+    local panel_of_normals_dir=${10}
+    local panel_of_normals=${11}
 
     ## Find the matched normal sample
     patient_id=$(echo "${tumour_id}" | cut -d'-' -f1,2)
@@ -252,6 +258,8 @@ pcgr_annotation() {
             --bind "${vep_dir}:${vep_dir}" \
             --bind "${output_dir}:${output_dir}" \
             --bind "${work_dir}:${work_dir}" \
+            --bind "${panel_of_normals_dir}:${panel_of_normals_dir}" \
+            --bind "/tmp:/tmp" \
             "${container_dir}/pcgr-2.2.1.sif" \
             pcgr \
                 --input_vcf "${reformatted_vcf}" \
@@ -285,10 +293,21 @@ pcgr_annotation() {
 export -f pcgr_annotation
 
 ## Run PCGR annotation in parallel
-cat ${sample_list} | parallel \
+## Run PCGR annotation in parallel
+cat ${tumour_all_samples} | parallel \
     --jobs "${jobs}" \
     --progress \
     -k \
-    pcgr_annotation {} "${vcf_dir}" "${cna_dir}" "${rna_dir}" "${bam_dir}" "${ref_data_dir}" "${vep_dir}" "${work_dir}" "${panel_of_normals}" "${container_dir}"
+    pcgr_annotation {} \
+    "${vcf_dir}" \
+    "${cna_dir}" \
+    "${rna_dir}" \
+    "${bam_dir}" \
+    "${ref_data_dir}" \
+    "${vep_dir}" \
+    "${work_dir}" \
+    "${container_dir}" \
+    "${panel_of_normals_dir}" \
+    "${panel_of_normals}" 
 
 echo "$(date +"%F") $(date +"%T")" "PCGR annotation completed for all samples."
