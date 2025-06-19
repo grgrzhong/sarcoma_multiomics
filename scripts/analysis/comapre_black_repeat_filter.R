@@ -218,7 +218,7 @@ plot <- results |>
     theme_minimal()+
     figure_theme2()
 
-SavePlot(
+savePlot(
     plot = plot,
     width = 4, 
     height = 3, 
@@ -278,7 +278,7 @@ plot <- results |>
     theme_minimal()+
     figure_theme2()
 
-SavePlot(
+savePlot(
     plot = plot,
     width = 4, 
     height = 3, 
@@ -369,7 +369,7 @@ SavePlot(
 #     figure_theme2() +
 #     theme(legend.position = "none")
 
-# SavePlot(
+# savePlot(
 #     plot = p1,
 #     width = 4, 
 #     height = 3, 

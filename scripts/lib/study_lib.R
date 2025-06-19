@@ -1,7 +1,6 @@
 ## Load required libraries
 suppressPackageStartupMessages(
     suppressWarnings({
-        library(maftools)
         library(qs)
         library(fs)
         library(here)
@@ -9,11 +8,17 @@ suppressPackageStartupMessages(
         library(writexl)
         library(kableExtra)
         library(gridExtra)
+        library(ggpubr)
+        library(rstatix)
+        library(ggrepel)
         library(tidyverse)
     })
 )
 
-SavePlot <- function(
+options(scipen = 999) # Disable scientific notation globally
+
+
+savePlot <- function(
     plot, width = 8, height = 6, only_png = FALSE, dir, filename) {
     ### Save png or pdf plots using ggplot2
 
@@ -214,7 +219,7 @@ plot_theme <- function() {
     )
 }
 
-TestVariantFilter <- function(
+testVariantFilter <- function(
     filter_params,
     maf) {
     # Apply filtering with parameters
@@ -260,7 +265,7 @@ TestVariantFilter <- function(
     )
 }
 
-PlotVariantFilter <- function(
+plotVariantFilter <- function(
     is_save = FALSE,
     fig_dir = "figures/variant_filtering",
     fig_name = "filter_params") {
@@ -337,7 +342,7 @@ PlotVariantFilter <- function(
         )
 
     if (is_save) {
-        SavePlot(
+        savePlot(
             plot = p,
             width = 4,
             height = 3,
@@ -347,7 +352,7 @@ PlotVariantFilter <- function(
     }
 }
 
-MafOncoPlot <- function(
+mafOncoPlot <- function(
     maf,
     genes = NULL,
     top_n_genes = 30,
@@ -421,7 +426,7 @@ MafOncoPlot <- function(
     print(p)
 }
 
-LoadSampleInfo <- function() {
+loadSampleInfo <- function() {
     read_xlsx(
         here(
             "data/clinical/DFSP_multiomics_sample_list_updated_20250509.xlsx"
@@ -429,7 +434,7 @@ LoadSampleInfo <- function() {
     )
 }
 
-AddCancerHotspot <- function(
+addCancerHotspot <- function(
     maf,                           # maf data in dataframe format
     hotspot = NULL,                # path to the hotspot file
     qvalue = NULL,                 # qvalue threshold
@@ -613,7 +618,7 @@ AddCancerHotspot <- function(
     return(maf_hotspot)
 }
 
-LoadCancerHotspot <- function(
+loadCancerHotspot <- function(
     hotspot = NULL,                # path to the hotspot file
     qvalue = NULL,                 # qvalue threshold
     median_allele_freq_rank = NULL, # median Allele Frequency Rank threshold 
@@ -756,7 +761,7 @@ LoadCancerHotspot <- function(
 }
 
 
-MergeAnnovarOutput <- function(
+mergeAnnovarOutput <- function(
     annovar_dir,
     is_save = FALSE,
     save_dir = "data/wes/annotation/merged"
@@ -1002,12 +1007,13 @@ MergeAnnovarOutput <- function(
 
 }
 
-LoadMergedAnnovar <- function(annovar_dir = "data/wes/annotation/merged") {
+loadMergedAnnovar <- function(
+    dir = "data/wes/annotation/merged",
+    filename = "annovar_maf_merged"
+) {
 
     # Load the merged maf file
-    file_name <- "annovar_maf_merged.qs"
-
-    merged_maf <- here(annovar_dir, file_name)
+    merged_maf <- here(dir, paste0(filename, ".qs"))
     
     if (!file.exists(merged_maf)) {
     
@@ -1023,7 +1029,7 @@ LoadMergedAnnovar <- function(annovar_dir = "data/wes/annotation/merged") {
     maf_tbl
 }
 
-FilterMergedMaf <- function(
+filterMergedMaf <- function(
     maf_tbl,
     # Filtering parameters by selected maf columns
     filter_params = list(
@@ -1210,7 +1216,7 @@ FilterMergedMaf <- function(
     return(maf_filter)
 }
 
-LoadDFSPGroupInfo <- function() {
+loadDFSPGroupInfo <- function() {
     
     sample_groups <- list(
         `U-DFSP` = c("Classic", "Myxoid", "Pigmented"),
@@ -1228,7 +1234,7 @@ LoadDFSPGroupInfo <- function() {
         `FS_DFSP` = c("Unpaired FST")
     )
 
-    sample_info <- LoadSampleInfo() |>
+    sample_info <- loadSampleInfo() |>
         filter(Specimen.Class == "Tumour") |>
         select(
             Sample.ID, Diagnosis, Specimen.Class, Specimen.Nature, Histology.Nature,
@@ -1246,4 +1252,605 @@ LoadDFSPGroupInfo <- function() {
         rename(Tumor_Sample_Barcode = Sample.ID)
     
     sample_info
+}
+
+addDFSPGroupInfo <- function(maf_tbl) {
+
+    ## Load the sample group info
+    clinical_info <- loadDFSPClinicalInfo()
+
+    group_info <- clinical_info |> 
+        dplyr::select(Sample.ID, FST.Group) |> 
+        rename(
+            Tumor_Sample_Barcode = Sample.ID
+        )
+
+    group_levels <- levels(group_info$FST.Group)
+
+    ## Add the sample group to the maf data
+    maf_tbl <- maf_tbl |>
+        left_join(
+            group_info,
+            by = "Tumor_Sample_Barcode"
+        )
+    # maf_obj@clinical.data <- maf_obj@clinical.data |> 
+    #     select(Tumor_Sample_Barcode) |>
+    #     left_join(group_info, by = "Tumor_Sample_Barcode")
+
+    # maf_obj
+    maf_tbl
+}
+
+collectPCGRData <- function(
+    dir, 
+    sheet_name="SOMATIC_SNV_INDEL"
+) {
+    
+    ## The sheet names in the PCGR files are:
+    # SAMPLE_ASSAY
+    # SOMATIC_SNV_INDEL
+    # SOMATIC_SNV_INDEL_BIOMARKER
+    # SOMATIC_CNA
+    # TMB
+    # MSI
+    # MUTATIONAL_SIGNATURE
+
+    ## Get all the PCGR files in the directory
+    pcgr_files <- dir_ls(
+        dir, 
+        glob = "*.pcgr.grch38.xlsx", 
+        recurse = TRUE
+    )
+    
+    ## Get the sample names from the file names
+    pcgr_samples <- pcgr_files |> 
+        path_file() |> 
+        str_remove(".pcgr.grch38.xlsx")
+    
+    message("Collecting PCGR data from ", length(pcgr_files), " files")
+
+    ## Load all data from PCGR files
+    pcgr_data <- tibble(
+        sample = pcgr_samples,
+        file = pcgr_files
+    ) |>
+        mutate(
+            data = map2(
+                file,
+                sample,
+                \(f, s) {
+                    message("Processing sample = ", s)
+                    read_xlsx(f, sheet = sheet_name)
+                },
+                .progress = TRUE
+            )
+        ) |> 
+        unnest(data) |> 
+        select(-sample, -file) |> 
+        janitor::clean_names()
+    
+    ## Return
+    pcgr_data
+}
+
+filterPCGRData <- function(
+    pcgr_data,
+    min_dp_tumor = 20,
+    min_vaf_tumor = 0.05,
+    min_dp_control = 10,
+    max_vaf_control = 0.01,
+    max_population_frequency = 0.001
+) {
+    ## Check the columns in the PCGR data
+    # all_columns <- colnames(pcgr_data)
+    # print(all_columns)
+    # anno_info <- c(
+    #     "variant_class", "consequence", "loss_of_function",
+    #     "exonic_status", "mutation_hotspot", "splice_effect",
+    #     "actionability", "clinvar_classification"
+    # )
+
+    # str(pcgr_data)
+    # unique(pcgr_data$variant_class)
+    # unique(pcgr_data$consequence)
+    # unique(pcgr_data$loss_of_function)
+    # unique(pcgr_data$exonic_status)
+    # unique(pcgr_data$mutation_hotspot)
+    # unique(pcgr_data$splice_effect)
+    # unique(pcgr_data$actionability)
+    # unique(pcgr_data$clinvar_classification)
+    # unique(pcgr_data$actionability)
+    # unique(pcgr_data$effect)
+
+    ## Sequencing depth and variant allele frequency filters
+    # str(pcgr_data)
+    message(
+        "Number of samples in PCGR data = ", length(unique(pcgr_data$sample_id))
+    )
+
+    message(
+        "Number of variants in PCGR data before filtering: ", nrow(pcgr_data)
+    )
+    
+    oncogenic_variants <- pcgr_data |>
+        filter(
+            oncogenicity %in% c("Oncogenic", "Likely_Oncogenic")
+        )
+    
+    message(
+        "Number of oncogenic variants in PCGR data: ", nrow(oncogenic_variants)
+    )
+    
+    actionable_variants <- pcgr_data |>
+        filter(
+            actionability %in% c("Potential significance")
+        )
+    message(
+        "Number of actionable variants in PCGR data: ", nrow(actionable_variants)
+    )
+    
+    filtered_data <- pcgr_data
+
+    if (!is.null(max_population_frequency)) {
+        
+        filtered_data <- filtered_data |>
+            filter(
+                is.na(gnom_a_de_af) | gnom_a_de_af < max_population_frequency
+            )
+    }
+
+    ## Tumor filtering
+    if (!is.null(min_dp_tumor)) {
+        
+        filtered_data <- filtered_data |>
+            filter(dp_tumor >= min_dp_tumor)
+    }
+    
+    if (!is.null(min_vaf_tumor)) {
+        
+        filtered_data <- filtered_data |>
+            filter(vaf_tumor >= min_vaf_tumor)
+    }
+
+    ## Control filtering
+    if (!is.null(min_dp_control)) {
+        
+        filtered_data <- filtered_data |>
+            filter(dp_control >= min_dp_control)
+    }
+
+    if (!is.null(max_vaf_control)) {
+        
+        filtered_data <- filtered_data |>
+            filter(
+                is.na(vaf_control) | vaf_control <= max_vaf_control
+            )
+    }
+    
+    ## Population frequency filtering
+    if (!is.null(max_population_frequency)) {
+        
+        filtered_data <- filtered_data |>
+            filter(
+                is.na(gnom_a_de_af) | gnom_a_de_af < max_population_frequency
+            )
+    }
+
+    # filtered_data <- filtered_data |>
+    #     filter(dp_tumor >= min_dp_tumor & vaf_tumor >= min_vaf_tumor) |>
+    #     filter(dp_control >= min_dp_control & vaf_control <= max_vaf_control)
+
+    message(
+        "Number of variants after Tumour/Control DP and VAF filtering = ", 
+        nrow(filtered_data)
+    )
+
+    ## "====================================================================="
+    ## Indel variants
+    ## "====================================================================="
+    filtered_indels <- filtered_data |>
+        filter(exonic_status %in% c("exonic", "splicing")) |>
+        filter(variant_class %in% c("insertion", "deletion"))
+
+    message("Number of InDels variants = ", nrow(filtered_indels))
+
+    ## Indel actionability variants
+    indel_oncogenicity <- filtered_indels |>
+        filter(oncogenicity %in% c("Oncogenic", "Likely_Oncogenic"))
+
+    message(
+        "Number of InDels with oncogenicity = ", nrow(indel_oncogenicity)
+    )
+
+    ## Indel actionability variants
+    indel_actionability <- filtered_indels |>
+        filter(actionability %in% c("Potential significance"))
+
+    ## "====================================================================="
+    ## SNV variants
+    ## "====================================================================="
+    filtered_snvs <- filtered_data |>
+        filter(!(variant_class %in% c("insertion", "deletion"))) |> 
+        filter(!consequence %in% c("synonymous_variant"))
+
+    message("Number of Non-indel variants (SNV, DNV, TNV, etc) = ", nrow(filtered_snvs))
+
+    ## Actinability snv variants
+    unique(filtered_data$actionability)
+    snvs_actionability <- filtered_snvs |>
+        filter(actionability %in% c("Potential significance"))
+
+    message(
+        "Number of SNVs with potential actionability = ", nrow(snvs_actionability)
+    )
+
+    ## Oncogenicity snv variants
+    unique(filtered_snvs$oncogenicity)
+    snvs_oncogenicity <- filtered_snvs |>
+        filter(oncogenicity %in% c("Oncogenic", "Likely_Oncogenic"))
+
+    message(
+        "Number of SNVs with oncogenicity = ", nrow(snvs_oncogenicity)
+    )
+
+    ## ClinVar classification snv variants
+    unique(filtered_snvs$clinvar_classification)
+    snvs_clinvar <- filtered_snvs |>
+        filter(clinvar_classification %in% c("Pathogenic", "Likely_pathogenic"))
+
+    message(
+        "Number of SNVs with ClinVar classification = ", nrow(snvs_clinvar)
+    )
+
+    ## Loss of function snv variants
+    unique(filtered_snvs$loss_of_function)
+    snvs_loss_of_function <- filtered_snvs |>
+        filter(loss_of_function)
+
+    message(
+        "Number of SNVs with loss of function = ", nrow(snvs_loss_of_function)
+    )
+
+    ## Splice effect snv variants
+    unique(filtered_snvs$splice_effect)
+    snvs_splice_disrupting <- filtered_snvs |>
+        filter(grepl("disrupting", splice_effect, ignore.case = TRUE))
+
+    message(
+        "Number of SNVs with splice disrupting effect = ", nrow(snvs_splice_disrupting)
+    )
+
+    ## Insilico predictions variant effect on protein function, damaging or pathogenic
+    unique(filtered_snvs$effect_predictions)[20]
+    predictions <- unique(filtered_snvs$effect_predictions)[20]
+    ## Filter for variants predicted as damaging (D)
+    snvs_damaging <- filtered_snvs |>
+        filter(grepl("D", effect_predictions))
+
+    message(
+        "Number of SNVs with damaging effect predictions = ", nrow(snvs_damaging)
+    )
+
+    ## Combine all variants
+    final_variants <- bind_rows(
+        oncogenic_variants,
+        actionable_variants,
+        filtered_indels,
+        indel_actionability,
+        indel_oncogenicity,
+        snvs_actionability,
+        snvs_oncogenicity,
+        snvs_clinvar,
+        snvs_loss_of_function,
+        snvs_splice_disrupting,
+        snvs_damaging
+    ) |>
+        distinct()
+    
+    message(
+        paste0(
+            "\n------------------------------------------------------",
+            "\nAfter filtering and combining:\n"
+        )
+    )
+
+    message(
+        "   Number of included unique variants = ", nrow(final_variants)
+    )
+
+    sample_variants <- final_variants |> 
+        group_by(sample_id) |> 
+        summarise(
+            n_variants = n(),
+            .groups = "drop"
+        ) |> 
+        arrange(n_variants)
+    
+
+    message(
+        "   Number of samples with variants: ", nrow(sample_variants)
+    )
+
+    summary_variants <- sample_variants |> 
+        summarise(
+            min_variants = min(n_variants, na.rm = TRUE),
+            max_variants = max(n_variants, na.rm = TRUE),
+            mean_variants = mean(n_variants, na.rm = TRUE),
+            median_variants = median(n_variants, na.rm = TRUE)
+        )
+    # message(
+    #     sprintf(
+    #         "   Summary of variants per sample:\n%s",
+    #         paste(capture.output(print(summary_variants)), collapse = "\n")
+    #     )
+    # )
+
+    ## Return
+    final_variants
+}
+
+convertPCGRToMaftools <- function(pcgr_tbl) {
+
+    maf_tbl <- pcgr_tbl |>
+        # Extract chromosome and position from genomic_change
+        mutate(
+            # Parse genomic change: e.g., "1:g.222633099TCCAG...>T"
+            chr_pos = str_extract(genomic_change, "^(\\d+|X|Y):g\\.(\\d+)"),
+            chromosome = str_extract(chr_pos, "^(\\d+|X|Y)"),
+            start_pos = as.numeric(str_extract(chr_pos, "(\\d+)$")),
+            
+            # Extract reference and alternate alleles
+            reference_allele = str_extract(genomic_change, "([ATCG]+)>", group = 1),
+            alternate_allele = str_extract(genomic_change, ">([ATCG]+)$", group = 1)
+        ) |> 
+        ## Maftools requires the following columns
+        mutate(Hugo_Symbol = symbol) |> 
+        mutate(Chromosome = paste0("chr", chromosome)) |> 
+        mutate(Start_Position = start_pos) |> 
+        mutate(
+            End_Position = case_when(
+                variant_class == "deletion" ~ start_pos + nchar(reference_allele) - 1,
+                variant_class == "insertion" ~ start_pos,
+                variant_class == "SNV" ~ start_pos,
+                variant_class == "substitution" ~ start_pos + nchar(reference_allele) - 1,
+                TRUE ~ start_pos
+            )
+        ) |> 
+        mutate(
+            Reference_Allele = reference_allele,
+            Tumor_Seq_Allele2 = alternate_allele
+        ) |> 
+        # mutate(
+        #     Reference_Allele = case_when(
+        #         variant_class == "insertion" ~ "-",
+        #         is.na(reference_allele) ~ "-",
+        #         TRUE ~ reference_allele
+        #     )
+            
+        # ) |> 
+        # mutate(
+        #     Tumor_Seq_Allele2 = case_when(
+        #         variant_class == "deletion" ~ "-",
+        #         is.na(alternate_allele) ~ "-",
+        #         TRUE ~ alternate_allele
+        #     )
+        # ) |> 
+        mutate(
+            Variant_Classification = case_when(
+                str_detect(consequence, "stop_gained") ~ "Nonsense_Mutation",
+                str_detect(consequence, "missense") ~ "Missense_Mutation",
+                str_detect(consequence, "synonymous") ~ "Silent",
+                str_detect(consequence, "frameshift") ~ ifelse(variant_class == "insertion", 
+                                                            "Frame_Shift_Ins", "Frame_Shift_Del"),
+                str_detect(consequence, "inframe_insertion") ~ "In_Frame_Ins",
+                str_detect(consequence, "inframe_deletion") ~ "In_Frame_Del",
+                str_detect(consequence, "splice") ~ "Splice_Site",
+                str_detect(consequence, "start_lost") ~ "Translation_Start_Site",
+                str_detect(consequence, "stop_lost") ~ "Nonstop_Mutation",
+                str_detect(consequence, "coding_sequence_variant") ~ "Missense_Mutation",
+                # Handle multiple consequences (take the first one)
+                str_detect(consequence, "protein_altering") ~ "Missense_Mutation",
+                TRUE ~ "Unknown"
+            )
+        ) |> 
+        mutate(
+            Variant_Type = case_when(
+                variant_class == "SNV" ~ "SNP",
+                variant_class == "insertion" ~ "INS", 
+                variant_class == "deletion" ~ "DEL",
+                variant_class == "substitution" & nchar(reference_allele) == 2 ~ "DNP",
+                variant_class == "substitution" & nchar(reference_allele) > 2 ~ "ONP",
+                TRUE ~ NA_character_
+            ),
+        ) |> 
+        mutate(Tumor_Sample_Barcode = sample_id) |> 
+        dplyr::select(
+            -chr_pos, -chromosome, -start_pos,
+            -reference_allele, -alternate_allele
+        )
+
+    maf_required_cols <- c(
+        "Tumor_Sample_Barcode", "Hugo_Symbol", "Chromosome", "Start_Position", "End_Position",
+        "Reference_Allele", "Tumor_Seq_Allele2", "Variant_Classification", 
+        "Variant_Type"
+    )
+    
+    ## Reorder the columns to have the required ones first
+    maf_tbl |> 
+        relocate(
+            all_of(maf_required_cols), 
+            everything()
+        )
+
+    maf_tbl
+
+}
+
+loadDFSPClinicalInfo <- function() {
+
+    file <- "data/clinical/DFSP_WES_clinical.csv"
+
+    clinical_info <- read_csv(here(file), show_col_types = FALSE) |> 
+        mutate(
+            Tumor_Sample_Barcode = Sample.ID
+        )
+    
+    # unique(clinical_info$FST.Group)
+    clinical_info <- clinical_info |> 
+        mutate(
+            FST.Group =factor(
+                FST.Group, 
+                levels = c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP")
+                # ordered = TRUE
+            )
+        )
+    
+    clinical_info
+}
+
+saveData <- function(obj, dir, filename) {
+    
+    ## Save data to qs file
+
+    fs::dir_create(here(dir))
+
+    qsave(obj, here(dir, paste0(filename, ".qs")))
+}
+
+loadData <- function(dir, filename) {
+    
+    ## Load qs data
+    qread(here(dir, paste0(filename, ".qs")))
+    
+}
+
+compareDFSPGroups <- function(
+    data,
+    group_col = "FST.Group",
+    value_col = "total_perMB",
+    stat_method = "wilcox_test",
+    is_paired = FALSE,
+    p_adjust_method = "BH",
+    p_value_threshold = 0.05
+
+) {
+
+    ## Check if the group_col and value_col are in the data
+    if (!(group_col %in% colnames(data))) {
+        stop(sprintf("Column '%s' not found in data", group_col))
+    }
+    
+    if (!(value_col %in% colnames(data))) {
+        stop(sprintf("Column '%s' not found in data", value_col))
+    }
+
+    ## Get the summary statistics for each group
+    summary_stats <- data |>
+        group_by(!!sym(group_col)) |>
+        get_summary_stats(!!sym(value_col))
+    
+    # print(summary_stats)
+
+    # ## TMB is the count data, so we will use a non-parametric test
+    # normality_test <- tmb_tbl |> 
+    #     group_by(FST.Group) |>
+    #     shapiro_test(total_perMB) |> 
+    #     mutate(
+    #         p = format(p, scientific = FALSE),
+    #         is_normal = case_when(
+    #             p < 0.05 ~ "No",
+    #             TRUE ~ "Yes"
+    #         )
+    #     ) 
+    # print(normality_test)
+
+    ## statistical test
+    if (stat_method == "wilcox_test") {
+
+        stat_test <- data |> 
+            mutate(value = !!sym(value_col), group = !!sym(group_col)) |>
+            wilcox_test(
+                value ~ group,
+                p.adjust.method = p_adjust_method,
+                paired = is_paired
+            ) |> 
+            add_significance(p.col = "p") |> 
+            add_xy_position(
+                x = group_col, 
+                step.increase = 0.12,
+                dodge = 0.8
+            )
+
+    } else {
+        
+        stat_test <- data |> 
+            mutate(value = !!sym(value_col), group = !!sym(group_col)) |>
+            t_test(
+                value ~ group,
+                p.adjust.method = p_adjust_method,
+                paired = is_paired
+            ) |> 
+            add_significance(p.col = "p") |> 
+            add_xy_position(
+                x = group_col, 
+                step.increase = 0.12,
+                dodge = 0.8
+            ) 
+    }
+    
+    ## Boxplot groups
+    plot <- data |> 
+        ggplot(aes(x = !!sym(group_col), y = !!sym(value_col))) +
+        geom_boxplot(outliers = FALSE, width = 0.5) +
+        geom_jitter(aes(color = !!sym(group_col)), width = 0.2, size = 0.5) +
+        scale_y_continuous(expand = expansion(mult = c(0.05, 0.1)))+
+        stat_pvalue_manual(
+            stat_test |> filter(p < p_value_threshold),
+            label = "p = {scales::pvalue(p)}",
+            y.position = "y.position",
+            size = 0.1,
+            label.size = 3,
+            bracket.size = 0.2,
+            tip.length = 0.01,
+            bracket.nudge.y = 0.1,
+            hide.ns = FALSE
+        )+
+        labs(
+            title = "",
+            x = "",
+            y = "TMB/mb"
+        ) +
+        figure_theme2()
+
+    ## Return
+    list(
+        summary_stats = summary_stats,
+        stat_test = stat_test,
+        plot = plot
+    )
+}
+
+loadDFSPColorConfigs <- function() {
+    list(
+        FST.Group = c(
+            "U-DFSP"    = "#3498db", # Blue - for untransformed DFSP
+            "Pre-FST"   = "#2ecc71", # Green - for pre-transformation samples
+            "Post-FST"  = "#e74c3c", # Red - for post-transformation samples
+            "FS-DFSP"   = "#9b59b6" # Purple - for unpaired FST
+        ),
+        Specimen.Nature = c(
+            "Primary"       = "#ff9800", # Orange
+            "Recurrence"    = "#009688", # Teal
+            "Metastasis"    = "#795548", # Brown
+            "Residual"      = "#607d8b" # Blue-gray
+        )
+    )
+}
+
+loadDFSPSampleGroups <- function() {
+    list(
+        "U-DFSP vs Pre-FST" = c("U-DFSP", "Pre-FST"),
+        "Pre-FST vs Post-FST" = c("Pre-FST", "Post-FST"),
+        "Post-FST vs FS-DFSP" = c("Post-FST", "FS-DFSP")
+    )
 }

@@ -235,7 +235,7 @@ out_dir <- here("results/black_repeatmasker")
 filename <- "black_repeatmasker_with_vs_without"
 title = "Distribution of total variants\nBlack list & repeatmasker with vs without filtering"
 
-SavePlot(
+savePlot(
     plot = compare_variants(results, group_name, title),
     width = 3.5, 
     height = 4, 
@@ -261,7 +261,7 @@ out_dir <- here("results/black_repeatmasker")
 filename <- "black_repeatmasker_with_vs_without"
 title = "Distribution of total variants\nBlack list & repeatmasker with vs without filtering"
 
-SavePlot(
+savePlot(
     plot = compare_variants(results, group_name, title),
     width = 3.5, 
     height = 4, 

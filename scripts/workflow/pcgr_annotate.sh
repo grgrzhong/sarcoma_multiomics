@@ -81,10 +81,8 @@ work_dir="${project_dir}/data/pcgr_test"
 mkdir -p "${work_dir}"
 
 ## tumour sample list
-tumour_all_samples="${project_dir}/data/wes/sample_info/tumour_all_samples.txt"
-
-# sample_list=$(ls $vcf_dir)
-sample_list=${tumour_all_samples}
+# sample_list="${project_dir}/data/wes/sample_info/tumour_all_samples.txt"
+sample_list="${project_dir}/data/wes/sample_info/selected_samples.txt"
 # cat ${sample_list}
 
 ## Parallel jobs
@@ -294,7 +292,7 @@ export -f pcgr_annotation
 
 ## Run PCGR annotation in parallel
 ## Run PCGR annotation in parallel
-cat ${tumour_all_samples} | parallel \
+cat ${sample_list} | parallel \
     --jobs "${jobs}" \
     --progress \
     -k \

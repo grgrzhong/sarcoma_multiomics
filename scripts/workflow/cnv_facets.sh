@@ -35,18 +35,12 @@ export dbsnp_index="${ref_dir}/dbSNP.vcf.gz.tbi"
 work_dir="${project_dir}/data/wes/cnv_facets"
 mkdir -p "${work_dir}"
 
-## All tumour sample list
-tumour_all_samples="${project_dir}/data/wes/sample_info/tumour_all_samples.txt"
-
-## Tumour samples without matching normals
-tumour_only_samples="${project_dir}/data/wes/sample_info/tumour_only_samples.txt"
-
-## Tumour samples with matching normals
-tumour_normal_samples="${project_dir}/data/wes/sample_info/tumour_normal_samples.txt"
-grep -v -f "${tumour_only_samples}" "${tumour_all_samples}" > "${tumour_normal_samples}"
+## sample list
+# sample_list="${project_dir}/data/wes/sample_info/tumour_all_samples.txt"
+# sample_list="${project_dir}/data/wes/sample_info/tumour_only_samples.txt"
+sample_list="${project_dir}/data/wes/sample_info/selected_samples.txt"
 
 # sample_list=${tumour_normal_samples}
-sample_list=${tumour_only_samples}
 cat "${sample_list}"
 
 ## Parallel jobs, modify this according to the available resources

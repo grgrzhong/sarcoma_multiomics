@@ -7,14 +7,14 @@ annovar_dir <- "data/wes/variant_calling/mutect2_with_black_repeat_filter_new"
 out_dir <- "data/wes/results/merged"
 
 # Run only once
-maf_tbl <- MergeAnnovarOutput(
+maf_tbl <- mergeAnnovarOutput(
     annovar_dir = annovar_dir,
     is_save = TRUE,
     save_dir = out_dir
 )
 
 ## Annotate variants with cancer hotspot info
-maf_tbl <- LoadMergedAnnovar(out_dir)
+maf_tbl <- loadMergedAnnovar(out_dir)
 
 # maf_tbl |> 
 #     select(tail(names(maf_tbl), 15), gnomAD_exome_ALL) |> 
@@ -150,7 +150,7 @@ second_inclusion_snv_cosmic <- first_inclusion_snv |>
     filter(!(cosmic70 %in% c(".")))
 
 ## Cancer hotspot
-snv_hotspots <- LoadCancerHotspot()[["snv_hotspots"]]
+snv_hotspots <- loadCancerHotspot()[["snv_hotspots"]]
 
 dfsp_snv_hotsopts <- first_inclusion_snv |> 
     mutate(match_change = paste0(Hugo_Symbol, "_", aaChange)) |>
@@ -267,7 +267,7 @@ sample_groups <- list(
     `FS_DFSP` = c("Unpaired FST")
 )
 
-sample_info <- LoadSampleInfo() |> 
+sample_info <- loadSampleInfo() |> 
     filter(Specimen.Class == "Tumour") |> 
     select(
         Sample.ID, Diagnosis, Specimen.Class, Specimen.Nature, Histology.Nature,
@@ -323,7 +323,7 @@ oncoplot(
     removeNonMutated = FALSE
 )
 
-# MafOncoPlot(
+# mafOncoPlot(
 #     maf = maf_obj,
 #     top_n_genes = top_n_genes,
 #     clinicalFeatures = clinical_features,

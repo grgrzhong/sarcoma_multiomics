@@ -76,6 +76,14 @@ convert_to_custom_format <- function(input_file_path, output_file_path) {
                 ) |>
                 dplyr::select(
                     Chromosome, Start, End, nMajor, nMinor
+                ) |> 
+                ## Make sure the the segments to be start > end
+                mutate(
+                    Start_fixed = if_else(Start > End, End, Start),
+                    End_fixed = if_else(Start > End, Start, End)
+                ) |> 
+                dplyr::select(
+                    Chromosome, Start = Start_fixed, End = End_fixed, nMajor, nMinor
                 )
 
     if (nrow(output_tsv) == 0) {

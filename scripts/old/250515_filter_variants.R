@@ -5,7 +5,7 @@ source(here::here("lib/R/study_lib.R"))
 # %% 
 ## Merge all the annovar annoated variants
 ## Run only once
-maf_tbl <- MergeAnnovarOutput(
+maf_tbl <- mergeAnnovarOutput(
     annovar_dir = "data/wes/variant_calling/mutect2_filter",
     is_save = TRUE,
     save_dir = "data/wes/annotation/merged"
@@ -13,11 +13,11 @@ maf_tbl <- MergeAnnovarOutput(
 
 # %% 
 ## Annotate variants with cancer hotspot info
-maf_tbl <- LoadMergedAnnovar()
+maf_tbl <- loadMergedAnnovar()
 
 ## 1. Use cancer hotspot databases (e.g., COSMIC, OncoKB, or custom hotspot lists) to prioritize variants located in known cancer-associated regions.
 ## 2. Filter variants to retain only those that overlap with hotspot regions, as these are more likely to have clinical significance.
-maf_tbl <- AddCancerHotspot(
+maf_tbl <- addCancerHotspot(
     maf = maf_tbl,
     qvalue = 0.05,
     median_allele_freq_rank = 0.5,
@@ -78,7 +78,7 @@ filter_params <- list(
 maf_tbl |> select(matches("pred")) |> colnames()
 
 # %% 
-maf_filter <- FilterMergedMaf(
+maf_filter <- filterMergedMaf(
     maf_tbl = maf_tbl,
     filter_params = filter_params
 )
@@ -108,7 +108,7 @@ sample_groups <- list(
     `FS_DFSP` = c("Unpaired FST")
 )
 
-sample_info <- LoadSampleInfo() |> 
+sample_info <- loadSampleInfo() |> 
     filter(Specimen.Class == "Tumour") |> 
     select(
         Sample.ID, Diagnosis, Specimen.Class, Specimen.Nature, Histology.Nature,
@@ -165,7 +165,7 @@ oncoplot(
     removeNonMutated = FALSE
 )
 
-# MafOncoPlot(
+# mafOncoPlot(
 #     maf = maf_obj,
 #     top_n_genes = top_n_genes,
 #     clinicalFeatures = clinical_features,
