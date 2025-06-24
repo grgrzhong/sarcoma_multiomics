@@ -8,10 +8,10 @@ if ! conda activate varcall; then
 fi
 
 ## Setup the working directory
-facet_dir=/home/zhonggr/projects/250224_DFSP_WES/data/wes/variant_calling/cnv/facets
+facet_dir=/home/zhonggr/projects/250224_sarcoma_multiomics/data/wes/cnv_facets
 # facet_dir=/home/zhonggr/projects/250224_DFSP_WES/data/wes/variant_calling/cnv/facets_test_normal
 
-annotation=/home/zhonggr/projects/250224_DFSP_WES/data/reference/Gencode/annotation_protein_coding.bed
+annotation=/mnt/m/Reference/Gencode/annotation_protein_coding.bed
 
 samples=${facet_dir}/samples.txt
 
@@ -43,7 +43,6 @@ for tumour_id in $(cat ${samples}); do
     bed_file=${out_dir}/${tumour_id}.bed
 
     tail -n +2 ${seg_file} > ${bed_file}
-
     ## Run bedtools intersect using the converted BED file
     output_file=${out_dir}/${tumour_id}.intersect.tsv
 

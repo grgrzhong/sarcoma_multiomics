@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=GISTIC2_parallel
+#SBATCH --job-name=GISTIC2
 #SBATCH --partition=amd
 #SBATCH --time=2:00:00
 #SBATCH --qos=normal

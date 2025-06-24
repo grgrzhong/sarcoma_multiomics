@@ -23,13 +23,15 @@
 ## "==========================================================================="
 
 ## General configuration
-export project_dir="/mnt/f/projects/250224_DFSP_Multiomics"
-export module_dir="${project_dir}/scripts/modules"
+export project_dir="/mnt/f/projects/250224_sarcoma_multiomics"
+export module_dir="${project_dir}/modules"
 export container_dir="${project_dir}/containers"
 export bam_dir="${project_dir}/data/wes/bam"
+
 export ref_dir="/mnt/m/Reference"
 export dbsnp="${ref_dir}/dbSNP.vcf.gz"
 export dbsnp_index="${ref_dir}/dbSNP.vcf.gz.tbi"
+export annotation="${ref_dir}/Gencode/annotation_protein_coding.bed"
 
 ## Define the working directory for CNV FACETS output
 work_dir="${project_dir}/data/wes/cnv_facets"
@@ -167,6 +169,63 @@ cnv_facets() {
                 --input "${output_tsv}" \
                 --output "${pcgr_tsv}"
 
+        ## ===================================================================
+        ## Step4: Annotate the segments with gene information
+        ## ===================================================================
+        echo "$(date +"%F")" "$(date +"%T")" "Step4: Annotating segments with gene information for tumour = ${tumour_id}"
+
+        ## Create the segment file
+        vcf_file="${work_dir}/${tumour_id}/${tumour_id}.vcf.gz"
+        seg_file="${work_dir}/${tumour_id}/${tumour_id}.seg"
+
+        singularity exec \
+            --bind "${project_dir}:${project_dir}" \
+            --bind "${work_dir}:${work_dir}" \
+            --bind "${module_dir}:${module_dir}" \
+            --bind /tmp:/tmp \
+            "${container_dir}/r-4.4.2.sif" \
+            Rscript ${module_dir}/cnv_facets_export_vcf_to_segment.R \
+                --input "${vcf_file}" \
+                --output "${seg_file}"
+
+        ## Annotate the segments with gene information
+        seg_header_file="${work_dir}/${tumour_id}/${tumour_id}.seg_header.txt"
+        head -n 1 "${seg_file}" > "${seg_header_file}"
+
+        ## Create the header for the annotation file
+        annotation_header_file="${work_dir}/${tumour_id}/${tumour_id}.annotation_header.txt"
+        echo -e "Chr\tStart\tEnd\tGene" > "${annotation_header_file}"
+        ## Combine the headers
+        header_file="${work_dir}/${tumour_id}/${tumour_id}.header.txt"
+        paste "${seg_header_file}" "${annotation_header_file}" > "${header_file}"
+
+        ## Remove the header and convert to BED format
+        bed_file="${work_dir}/${tumour_id}/${tumour_id}.bed"
+        tail -n +2 "${seg_file}" > "${bed_file}"
+        
+        ## Run bedtools intersect using the converted BED file
+        intersect_tsv="${work_dir}/${tumour_id}/${tumour_id}.intersect.tsv"
+        
+        singularity exec \
+            --bind "${project_dir}:${project_dir}" \
+            --bind "${work_dir}:${work_dir}" \
+            --bind "${ref_dir}:${ref_dir}" \
+            --bind "${module_dir}:${module_dir}" \
+            --bind /tmp:/tmp \
+            "${container_dir}/bedtools-2.31.1.sif" \
+            bedtools intersect \
+                -wa \
+                -wb \
+                -a "${bed_file}" \
+                -b "${annotation}" \
+                > "${intersect_tsv}"
+        
+        ## Create the final annotated file
+        final_file="${work_dir}/${tumour_id}/${tumour_id}.annotated.tsv"
+        cat "${header_file}" "${intersect_tsv}" > "${final_file}"
+        
+        ## Clean up intermediate files
+        rm "${seg_header_file}" "${annotation_header_file}" "${header_file}" "${bed_file}" "${intersect_tsv}"
     fi
 }
 

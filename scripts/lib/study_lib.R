@@ -434,6 +434,18 @@ loadSampleInfo <- function() {
     )
 }
 
+loadOncoKBGeneList <- function() {
+    file_path <- here("data/public/cancerGeneList.tsv")
+
+    if (!file_exists(file_path)) {
+        stop("OncoKB gene list file not found: ", file_path)
+    }
+
+    data <- read_tsv(file_path, show_col_types = FALSE)
+
+    data |> pull(`Hugo Symbol`)
+}
+
 addCancerHotspot <- function(
     maf,                           # maf data in dataframe format
     hotspot = NULL,                # path to the hotspot file
@@ -1389,8 +1401,20 @@ filterPCGRData <- function(
         "Number of actionable variants in PCGR data: ", nrow(actionable_variants)
     )
     
+    ## OncoKB gene list
+    oncokb_genes <- loadOncoKBGeneList()
+    oncokb_genes <- pcgr_data |> 
+        filter(symbol %in% oncokb_genes) |>
+        pull(symbol) |> 
+        unique()
+
+    message(
+        "Number of OncoKB genes in PCGR data: ", length(oncokb_genes)
+    )
+
     filtered_data <- pcgr_data
 
+    ## Population frequency filtering
     if (!is.null(max_population_frequency)) {
         
         filtered_data <- filtered_data |>
@@ -1426,22 +1450,13 @@ filterPCGRData <- function(
                 is.na(vaf_control) | vaf_control <= max_vaf_control
             )
     }
-    
-    ## Population frequency filtering
-    if (!is.null(max_population_frequency)) {
-        
-        filtered_data <- filtered_data |>
-            filter(
-                is.na(gnom_a_de_af) | gnom_a_de_af < max_population_frequency
-            )
-    }
 
     # filtered_data <- filtered_data |>
     #     filter(dp_tumor >= min_dp_tumor & vaf_tumor >= min_vaf_tumor) |>
     #     filter(dp_control >= min_dp_control & vaf_control <= max_vaf_control)
 
     message(
-        "Number of variants after Tumour/Control DP and VAF filtering = ", 
+        "\nNumber of variants after Tumour/Control DP and VAF filtering = ", 
         nrow(filtered_data)
     )
 
@@ -1459,12 +1474,16 @@ filterPCGRData <- function(
         filter(oncogenicity %in% c("Oncogenic", "Likely_Oncogenic"))
 
     message(
-        "Number of InDels with oncogenicity = ", nrow(indel_oncogenicity)
+        "   - Number of InDels with oncogenicity = ", nrow(indel_oncogenicity)
     )
 
     ## Indel actionability variants
     indel_actionability <- filtered_indels |>
         filter(actionability %in% c("Potential significance"))
+
+    message(
+        "   - Number of InDels with potential actionability = ", nrow(indel_actionability)
+    )
 
     ## "====================================================================="
     ## SNV variants
@@ -1473,7 +1492,7 @@ filterPCGRData <- function(
         filter(!(variant_class %in% c("insertion", "deletion"))) |> 
         filter(!consequence %in% c("synonymous_variant"))
 
-    message("Number of Non-indel variants (SNV, DNV, TNV, etc) = ", nrow(filtered_snvs))
+    message("\nNumber of Non-indel variants (SNV, DNV, TNV, etc) = ", nrow(filtered_snvs))
 
     ## Actinability snv variants
     unique(filtered_data$actionability)
@@ -1481,7 +1500,7 @@ filterPCGRData <- function(
         filter(actionability %in% c("Potential significance"))
 
     message(
-        "Number of SNVs with potential actionability = ", nrow(snvs_actionability)
+        "   - Number of SNVs with potential actionability = ", nrow(snvs_actionability)
     )
 
     ## Oncogenicity snv variants
@@ -1490,7 +1509,7 @@ filterPCGRData <- function(
         filter(oncogenicity %in% c("Oncogenic", "Likely_Oncogenic"))
 
     message(
-        "Number of SNVs with oncogenicity = ", nrow(snvs_oncogenicity)
+        "   - Number of SNVs with oncogenicity = ", nrow(snvs_oncogenicity)
     )
 
     ## ClinVar classification snv variants
@@ -1499,7 +1518,7 @@ filterPCGRData <- function(
         filter(clinvar_classification %in% c("Pathogenic", "Likely_pathogenic"))
 
     message(
-        "Number of SNVs with ClinVar classification = ", nrow(snvs_clinvar)
+        "   - Number of SNVs with ClinVar classification = ", nrow(snvs_clinvar)
     )
 
     ## Loss of function snv variants
@@ -1508,7 +1527,7 @@ filterPCGRData <- function(
         filter(loss_of_function)
 
     message(
-        "Number of SNVs with loss of function = ", nrow(snvs_loss_of_function)
+        "   - Number of SNVs with loss of function = ", nrow(snvs_loss_of_function)
     )
 
     ## Splice effect snv variants
@@ -1517,7 +1536,7 @@ filterPCGRData <- function(
         filter(grepl("disrupting", splice_effect, ignore.case = TRUE))
 
     message(
-        "Number of SNVs with splice disrupting effect = ", nrow(snvs_splice_disrupting)
+        "   - Number of SNVs with splice disrupting effect = ", nrow(snvs_splice_disrupting)
     )
 
     ## Insilico predictions variant effect on protein function, damaging or pathogenic
@@ -1528,7 +1547,7 @@ filterPCGRData <- function(
         filter(grepl("D", effect_predictions))
 
     message(
-        "Number of SNVs with damaging effect predictions = ", nrow(snvs_damaging)
+        "   - Number of SNVs with damaging effect predictions = ", nrow(snvs_damaging)
     )
 
     ## Combine all variants
@@ -1848,9 +1867,40 @@ loadDFSPColorConfigs <- function() {
 }
 
 loadDFSPSampleGroups <- function() {
+
+    ## Load clincical info
+    # clinical_info <- loadDFSPClinicalInfo()
+
+    # group_pairs <- combn(groups, 2, simplify = FALSE)
+
+    ## Non-Metastasis vs Metastasis
+    Metastasis <- list(
+        "Non-Metastasis vs Metastasis" = c("No", "Yes")
+    )
+
+    Main.Met <- list(
+        "No vs Yes" = c("No", "Yes")
+    )
+
+    ## Non-FST vs FST
+    FST <- list(
+        "No vs Yes" = c("No", "Yes")
+    )
+
+    ## FST transformation groups
+    FST.Group <- list(
+        "U-DFSP vs Pre-FST"    = c("U-DFSP", "Pre-FST"),
+        "U-DFSP vs Post-FST"   = c("U-DFSP", "Post-FST"),
+        "U-DFSP vs FS-DFSP"    = c("U-DFSP", "FS-DFSP"),
+        "Pre-FST vs Post-FST"  = c("Pre-FST", "Post-FST"),
+        "Pre-FST vs FS-DFSP"   = c("Pre-FST", "FS-DFSP"),
+        "Post-FST vs FS-DFSP"  = c("Post-FST", "FS-DFSP")
+    )
+
     list(
-        "U-DFSP vs Pre-FST" = c("U-DFSP", "Pre-FST"),
-        "Pre-FST vs Post-FST" = c("Pre-FST", "Post-FST"),
-        "Post-FST vs FS-DFSP" = c("Post-FST", "FS-DFSP")
+        Metastasis = Metastasis,
+        Main.Met = Main.Met,
+        FST = FST,
+        FST.Group = FST.Group
     )
 }
