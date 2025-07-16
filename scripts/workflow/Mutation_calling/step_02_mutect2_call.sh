@@ -1,73 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=mutect2_call
-#SBATCH --partition=amd
-#SBATCH --time=96:00:00
-#SBATCH --qos=normal
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
-#SBATCH --mem-per-cpu=4G
-#SBATCH --output=/home/zhonggr/projects/250224_DFSP_Multiomics/slurm/%x_%j.out
-#SBATCH --output=/home/zhonggr/projects/250224_DFSP_Multiomics/slurm/%x_%j.err
-#SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=zhonggr@hku.hk
 
-## ===========================================================================
-## Mutect2 call
-## Authors: Zhong Guorui
-## Date: 2025-06-10
-## Description: This script was adapted from "M:\Scripts\DNA analysis\PCGR_annotate.sh"
-## Added features:
-##      1. Prallelization using GNU parallel;
-##      2. Use singularity container to reproduce the same environment
-## ===========================================================================
+#############################################################################
+# Somatic Mutation Workflow - MuTect2 Calling Script
+# This script performs MuTect2 variant calling, filtering, and annotation.
+#############################################################################
 
-## ===========================================================================
-## Enable and modify this if runing at local environment
-## ===========================================================================
-export project_dir="/mnt/f/projects/250224_DFSP_Multiomics"
-export bam_dir="${project_dir}/data/wes/bam"
-# export bam_dir="/mnt/m/WES/DFSP/BAM"
-export ref_dir="/mnt/m/Reference"
-export reference="${ref_dir}/Gencode/gencode.hg38.v36.primary_assembly.fa"
-export germline="${ref_dir}/Population_database/somatic-hg38_af-only-gnomad.hg38.vcf.gz"
-export annotation_file="${ref_dir}/Funocator_Datasource/funcotator_dataSources.v1.7.20200521s/"
-export interval="${ref_dir}/Exome/xgen-exome-hyb-panel-v2-hg38_200bp_sorted_merged/xgen-exome-hyb-panel-v2-hg38_200bp_sorted_merged.bed"
-export pon="${ref_dir}/WES/DFSP/PON-Mutect/pon.vcf.gz"
-
-## Define work directory
-export work_dir="${project_dir}/data/wes/mutect2"
-mkdir -p ${work_dir}
-
-## Create header files needed for repeatmasker and blacklist annotation
-echo -e "##INFO=<ID=RepeatMasker,Number=1,Type=String,Description=\"RepeatMasker\">" >${work_dir}/vcf.rm.header
-echo -e "##INFO=<ID=EncodeDacMapability,Number=1,Type=String,Description=\"EncodeDacMapability\">" >${work_dir}/vcf.map.header
-
-## tumour sample list
-tumour_all_samples="${project_dir}/data/wes/sample_info/tumour_all_samples.txt"
-
-sample_list=${tumour_all_samples}
-cat "${sample_list}"
-
-## Parallel jobs, modify this according to the available resources
-num_sample=$(echo "${sample_list}" | wc -l)
-if [ "${num_sample}" -ge 15 ]; then    
-    jobs=15
-else
-    jobs=$num_sample
-fi
-
-echo "===================================================================="
-echo "Project directory:    ${project_dir}"
-echo "Reference directory:  ${ref_dir}"
-echo "Bam directory:        ${bam_dir}"
-echo "Work directory:       ${work_dir}"
-echo "Reference:            ${reference}"
-echo "Germline:             ${germline}"
-echo "Annotation file:      ${annotation_file}"
-echo "Interval:             ${interval}"
-echo "Panel of Normal:      ${pon}"
-echo "===================================================================="
+# Create the output directories if they do not exist
+mkdir -p "${MUTECT2_DIR}"
 
 ## Function to run mutect2 and filtering
 mutect2_call() {
@@ -358,6 +297,33 @@ mutect2_call() {
 ## Export function to make it available to GNU parallel
 export -f mutect2_call
 
+## ===========================================================================
+## Enable and modify this if runing at local environment
+## ===========================================================================
+export project_dir="/mnt/f/projects/250224_DFSP_Multiomics"
+export bam_dir="${project_dir}/data/wes/bam"
+# export bam_dir="/mnt/m/WES/DFSP/BAM"
+export ref_dir="/mnt/m/Reference"
+export reference="${ref_dir}/Gencode/gencode.hg38.v36.primary_assembly.fa"
+export germline="${ref_dir}/Population_database/somatic-hg38_af-only-gnomad.hg38.vcf.gz"
+export annotation_file="${ref_dir}/Funocator_Datasource/funcotator_dataSources.v1.7.20200521s/"
+export interval="${ref_dir}/Exome/xgen-exome-hyb-panel-v2-hg38_200bp_sorted_merged/xgen-exome-hyb-panel-v2-hg38_200bp_sorted_merged.bed"
+export pon="${ref_dir}/WES/DFSP/PON-Mutect/pon.vcf.gz"
+
+## Define work directory
+export work_dir="${project_dir}/data/wes/mutect2"
+mkdir -p ${work_dir}
+
+## Create header files needed for repeatmasker and blacklist annotation
+echo -e "##INFO=<ID=RepeatMasker,Number=1,Type=String,Description=\"RepeatMasker\">" >${work_dir}/vcf.rm.header
+echo -e "##INFO=<ID=EncodeDacMapability,Number=1,Type=String,Description=\"EncodeDacMapability\">" >${work_dir}/vcf.map.header
+
+## tumour sample list
+tumour_all_samples="${project_dir}/data/wes/sample_info/tumour_all_samples.txt"
+
+sample_list=${tumour_all_samples}
+cat "${sample_list}"
+
 ## Run the processing in parallel
 cat ${sample_list} | parallel \
     --jobs "${jobs}" \
@@ -365,6 +331,7 @@ cat ${sample_list} | parallel \
     -k \
     mutect2_call {} "${ref_dir}" "${bam_dir}" "${work_dir}" "${reference}" "${germline}" "${annotation_file}" "${interval}" "${pon}"
 
+# Clean up temporary files
 rm ${work_dir}/vcf.rm.header
 rm ${work_dir}/vcf.map.header
 

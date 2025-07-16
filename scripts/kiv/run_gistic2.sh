@@ -7,8 +7,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem-per-cpu=4G
-#SBATCH --output=/home/zhonggr/projects/250224_DFSP_Multiomics/slurm/%x_%j.out
-#SBATCH --error=/home/zhonggr/projects/250224_DFSP_Multiomics/slurm/%x_%j.err
+#SBATCH --output=/home/zhonggr/projects/250224_DFSP_WES/slurm/%x_%j.out
+#SBATCH --error=/home/zhonggr/projects/250224_DFSP_WES/slurm/%x_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=zhonggr@hku.hk
 
@@ -18,12 +18,12 @@ module load gnuparallel/20211222
 # Set paths
 gistic2_dir=/share1/GISTIC/2.0.23/bin
 reference="/lustre1/g/path_my/250224_DFSP_WES/data/reference/hg38.UCSC.add_miR.160920.refgene.mat"
-work_dir="/lustre1/g/path_my/250224_DFSP_WES/data/wes/variant_calling/cnv/gistic2"
+work_dir="/lustre1/g/path_my/250224_DFSP_WES/data/wes/gistic2_group"
 
 # Create a simple function to run GISTIC2 on one file
 run_gistic() {
     local input_file=$1
-    local basename=$(basename "$input_file" .seg)
+    local basename=$(basename "$input_file" .tsv)
     local out_dir="${work_dir}/gistic2_${basename}"
     
     echo "Processing: $input_file"
@@ -53,18 +53,17 @@ export work_dir
 file_count=$(find "$work_dir" -name "*.seg" | wc -l)
 echo "Found $file_count .seg files"
 
-# Calculate number of parallel jobs
+# Calculate number of parallel jobs (max 8, min 1)
 if [ $file_count -ge 15 ]; then
     jobs=15
 else
     jobs=$file_count
 fi
 
-jobs=1
 echo "Will run with $jobs parallel jobs"
 
 # Find all ready-to-use segment files and run in parallel
-find "$work_dir" -name "*.seg" | parallel \
+find "$work_dir" -name "*gistic2.seg" | parallel \
     --jobs ${jobs} \
     --progress \
     run_gistic

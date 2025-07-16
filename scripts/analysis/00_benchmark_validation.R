@@ -2,8 +2,8 @@
 source(here::here("bin/R/lib/study_lib.R"))
 
 # Define paths
-work_dir <- "/home/zhonggr/projects/250224_DFSP_WES/data/benchmark/HCC1395"
-# work_dir <- "/home/zhonggr/projects/250224_DFSP_WES/data/benchmark/NA12878"
+work_dir <- "/home/zhonggr/projects/250224_sarcoma_multiomics/data/benchmark/HCC1395"
+# work_dir <- "/home/zhonggr/projects/250224_sarcoma_multiomics/data/benchmark/NA12878"
 
 mutect2_dirs <- dir_ls(work_dir, pattern = "mutect2_", type = "directory")
 mutect2_dirs <- mutect2_dirs[str_detect(basename(mutect2_dirs), "^mutect2_")]

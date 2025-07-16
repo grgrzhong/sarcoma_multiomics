@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Set directories
-# data_dir="${1:-/home/zhonggr/projects/250224_DFSP_WES/data/sarc}"
-data_dir="${1:-/home/zhonggr/projects/250224_DFSP_WES/data/wes}"
+# data_dir="${1:-/home/zhonggr/projects/250224_sarcoma_multiomics/data/sarc}"
+data_dir="${1:-/home/zhonggr/projects/250224_sarcoma_multiomics/data/wes}"
 fastq_dir="${data_dir}/preprocessing/fastq"  # This contains all FASTQ files, not organized by sample
 bam_dir="${data_dir}/preprocessing/recalibrated"
 

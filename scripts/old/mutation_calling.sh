@@ -6,7 +6,7 @@
 #############################################################################
 
 # Load the project configuration
-source "/lustre1/g/path_my/250224_DFSP_WES/conf/project_config.sh"
+source "/lustre1/g/path_my/250224_sarcoma_multiomics/conf/project_config.sh"
 
 # Print project settings
 echo "====================== Project Settings ======================"

@@ -5,7 +5,7 @@ source(here::here("lib/R/study_lib.R"))
 # %% 
 ## Merge all the annovar annoated variants
 ## Run only once
-maf_tbl <- mergeAnnovarOutput(
+maf_tbl <- collectAnnovarData(
     annovar_dir = "data/wes/variant_calling/mutect2_filter",
     is_save = TRUE,
     save_dir = "data/wes/annotation/merged"

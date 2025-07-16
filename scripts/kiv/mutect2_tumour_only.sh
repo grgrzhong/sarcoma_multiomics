@@ -17,10 +17,10 @@ source $(conda info --base)/etc/profile.d/conda.sh
 conda activate varcall
 
 # Define directories
-export ref_dir="/home/zhonggr/projects/250224_DFSP_WES/data/reference"
-export bam_dir="/home/zhonggr/projects/250224_DFSP_WES/data/wes/preprocessing/recalibrated"
-export vcf_dir="/home/zhonggr/projects/250224_DFSP_WES/data/wes/variant_calling/mutect2"
-export work_dir="/home/zhonggr/projects/250224_DFSP_WES/data/wes/variant_calling/mutect2_tumour_only"
+export ref_dir="/home/zhonggr/projects/250224_sarcoma_multiomics/data/reference"
+export bam_dir="/home/zhonggr/projects/250224_sarcoma_multiomics/data/wes/preprocessing/recalibrated"
+export vcf_dir="/home/zhonggr/projects/250224_sarcoma_multiomics/data/wes/variant_calling/mutect2"
+export work_dir="/home/zhonggr/projects/250224_sarcoma_multiomics/data/wes/variant_calling/mutect2_tumour_only"
 mkdir -p ${work_dir}
 
 # Define reference files
@@ -241,7 +241,7 @@ export -f mutect_call_filter
 # cat "${work_dir}/sample_list.txt"
 
 # Number of parallel processes to run (adjust based on your system's capacity)
-sample_list=/home/zhonggr/projects/250224_DFSP_WES/data/wes/sample_info/tumour_all_samples.txt
+sample_list=/home/zhonggr/projects/250224_sarcoma_multiomics/data/wes/sample_info/tumour_all_samples.txt
 
 PARALLEL_JOBS=25
 

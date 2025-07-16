@@ -8,7 +8,7 @@
 #############################################################################
 
 # Load the project configuration first
-PROJECT_CONFIG="/lustre1/g/path_my/250224_DFSP_WES/conf/project_config.sh"
+PROJECT_CONFIG="/lustre1/g/path_my/250224_sarcoma_multiomics/conf/project_config.sh"
 if [ ! -f "$PROJECT_CONFIG" ]; then
     echo "Error: Project configuration not found at $PROJECT_CONFIG"
     exit 1

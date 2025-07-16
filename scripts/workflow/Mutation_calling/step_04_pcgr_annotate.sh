@@ -1,16 +1,4 @@
 #!/bin/bash
-#SBATCH --job-name=pcgr_annotation
-#SBATCH --partition=amd
-#SBATCH --time=2:00:00
-#SBATCH --qos=normal
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
-#SBATCH --mem-per-cpu=4G
-#SBATCH --output=/home/zhonggr/projects/250224_DFSP_Multiomics/slurm/%x_%j.out
-#SBATCH --error=/home/zhonggr/projects/250224_DFSP_Multiomics/slurm/%x_%j.err
-#SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=zhonggr@hku.hk
 
 ###############################################################################
 ## PCGR annotation reference (https://sigven.github.io/pcgr/index.html)
@@ -22,28 +10,20 @@
 ##      2. Use singularity container to keep the environment consistent;
 ###############################################################################
 
-
 ## ===========================================================================
 ## Enable and modify this if runing at local environment
 ## ===========================================================================
-export project_dir="/mnt/f/projects/250224_DFSP_Multiomics"
+export project_dir="/mnt/f/projects/sarcoma_multiomics"
 export ref_dir="/mnt/m/Reference"
-
-## ===========================================================================
-## Enable and modify this if runing at HPC environment
-## ===========================================================================
-# export project_dir="/lustre1/g/path_my/250224_DFSP_Multiomics"
-# export ref_dir="/lustre1/g/path_my/Reference"
 
 ## ===========================================================================
 ## General configurations
 ## ===========================================================================
 export module_dir="${project_dir}/scripts/modules"
 export container_dir="${project_dir}/containers"
-export bam_dir="${project_dir}/data/wes/bam"
-export vcf_dir="${project_dir}/data/wes/mutect2"
-export cna_dir="${project_dir}/data/wes/cnv_facets"
-export rna_dir="${project_dir}/data/rna"
+export bam_dir="${project_dir}/data/WES/BAM"
+export vcf_dir="${project_dir}/data/WES/Mutect2"
+export cna_dir="${project_dir}/data/WES/CNV/cnv_facets"
 
 export ref_data_dir="${ref_dir}/PCGR_reference/20250314"
 export vep_dir="${ref_dir}/VEP_cache"
@@ -140,6 +120,7 @@ pcgr_annotation() {
         is_paired="true"
     fi
 
+    echo "${is_paired}"
     ## Check if input VCF exists
     input_vcf="${vcf_dir}/${tumour_id}/${tumour_id}.final.vcf.gz"
 
@@ -175,7 +156,7 @@ pcgr_annotation() {
             --bind "${output_dir}:${output_dir}" \
             --bind "${module_dir}:${module_dir}" \
             --bind "/tmp:/tmp" \
-            "${container_dir}/pysam-0.23.2.sif" \
+            "${container_dir}/pysam.sif" \
             python "${module_dir}/pcgr_reformat_vcf_tumour_normal.py" \
                 --input "${input_vcf}" \
                 --output "${reformatted_vcf}"
@@ -185,7 +166,7 @@ pcgr_annotation() {
         singularity exec \
             --bind "${work_dir}:${work_dir}" \
             --bind "${output_dir}:${output_dir}" \
-            "${container_dir}/tabix-1.11.sif" \
+            "${container_dir}/tabix.sif" \
             tabix -p vcf "${reformatted_vcf}"
         
         ## Run PCGR annotation
@@ -194,7 +175,7 @@ pcgr_annotation() {
             --bind "${vep_dir}:${vep_dir}" \
             --bind "${output_dir}:${output_dir}" \
             --bind "${work_dir}:${work_dir}" \
-            "${container_dir}/pcgr-2.2.1.sif" \
+            "${container_dir}/pcgr.sif" \
             pcgr \
             --input_vcf "${reformatted_vcf}" \
             --input_cna "${input_cna}" \
@@ -237,7 +218,7 @@ pcgr_annotation() {
             --bind "${output_dir}:${output_dir}" \
             --bind "${module_dir}:${module_dir}" \
             --bind "/tmp:/tmp" \
-            "${container_dir}/pysam-0.23.2.sif" \
+            "${container_dir}/pysam.sif" \
             python "${module_dir}/pcgr_reformat_vcf_tumour_only.py" \
                 --input "${input_vcf}" \
                 --output "${reformatted_vcf}"
@@ -247,7 +228,7 @@ pcgr_annotation() {
         singularity exec \
             --bind "${work_dir}:${work_dir}" \
             --bind "${output_dir}:${output_dir}" \
-            "${container_dir}/tabix-1.11.sif" \
+            "${container_dir}/tabix.sif" \
             tabix -p vcf "${reformatted_vcf}"
         
         ## Run PCGR annotation
@@ -258,7 +239,7 @@ pcgr_annotation() {
             --bind "${work_dir}:${work_dir}" \
             --bind "${panel_of_normals_dir}:${panel_of_normals_dir}" \
             --bind "/tmp:/tmp" \
-            "${container_dir}/pcgr-2.2.1.sif" \
+            "${container_dir}/pcgr.sif" \
             pcgr \
                 --input_vcf "${reformatted_vcf}" \
                 --input_cna "${input_cna}" \

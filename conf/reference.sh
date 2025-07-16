@@ -83,12 +83,12 @@ wget https://storage.googleapis.com/dm_alphamissense/AlphaMissense_hg38.tsv.gz
 gunzip AlphaMissense_hg38.tsv.gz
 
 # Benchmark data directory 
-cd /home/zhonggr/projects/250224_DFSP_WES/data/reference/NA12878
+cd /home/zhonggr/projects/250224_sarcoma_multiomics/data/reference/NA12878
 
 ##############################################################################
 # NA12878 (HG001) benchmark data from the GIAB
 ##############################################################################
-out_dir="/home/zhonggr/projects/250224_DFSP_WES/data/reference/NA12878"
+out_dir="/home/zhonggr/projects/250224_sarcoma_multiomics/data/reference/NA12878"
 mkdir -p ${out_dir}
 cd ${out_dir}
 

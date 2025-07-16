@@ -9,14 +9,14 @@
 # Remote server details
 remote_user="zhonggr"
 remote_host="hpcio2" # hpc2021-io1.hku.hk 
-remote_base_dir="/lustre1/g/path_my/250224_DFSP_WES"
+# remote_base_dir="/lustre1/g/path_my/250224_sarcoma_multiomics"
 
 # Define folders to sync (absolute paths)
 # Format: "local_absolute_path:remote_absolute_path"
 folders_to_sync=(
     "/mnt/m/Reference:/lustre1/g/path_my/Reference"
-    # "/home/zhonggr/projects/250224_DFSP_WES/data/benchmark:/lustre1/g/path_my/250224_DFSP_WES/data/benchmark"
-    # "/home/zhonggr/projects/250224_DFSP_WES/containers:/lustre1/g/path_my/250224_DFSP_WES/containers"
+    # "/home/zhonggr/projects/250224_sarcoma_multiomics/data/benchmark:/lustre1/g/path_my/250224_sarcoma_multiomics/data/benchmark"
+    # "/home/zhonggr/projects/250224_sarcoma_multiomics/containers:/lustre1/g/path_my/250224_sarcoma_multiomics/containers"
     # Add more folders as needed in the same format
 )
 

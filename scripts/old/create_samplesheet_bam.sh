@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Set directories
-PROJECT_DIR="/home/zhonggr/projects/250224_DFSP_WES"
+PROJECT_DIR="/home/zhonggr/projects/250224_sarcoma_multiomics"
 # WORK_DIR="data/WES/DFSP"
 WORK_DIR="data/WES/SARC"
 BAM_DIR=$PROJECT_DIR/$WORK_DIR/BAM

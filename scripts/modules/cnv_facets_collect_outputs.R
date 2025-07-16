@@ -176,5 +176,5 @@ if (!interactive()) {
 }
 
 # For testing, comment this out when not testing
-input_dir <- "/home/zhonggr/projects/250224_DFSP_WES/data/wes/variant_calling/cnv/facets"
+input_dir <- "/home/zhonggr/projects/250224_sarcoma_multiomics/data/wes/variant_calling/cnv/facets"
 collect_seg_files(input_dir)

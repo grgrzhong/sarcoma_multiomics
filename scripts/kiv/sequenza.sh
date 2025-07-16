@@ -2,9 +2,9 @@
 
 # Test the singularity container for Sequenza
 singularity shell \
-    --bind /home/zhonggr/projects/250224_DFSP_WES/test:/data \
-    --bind /home/zhonggr/projects/250224_DFSP_WES/data/reference:/reference \
-    /home/zhonggr/projects/250224_DFSP_WES/containers/singularity/sequenzautils.sif
+    --bind /home/zhonggr/projects/250224_sarcoma_multiomics/test:/data \
+    --bind /home/zhonggr/projects/250224_sarcoma_multiomics/data/reference:/reference \
+    /home/zhonggr/projects/250224_sarcoma_multiomics/containers/singularity/sequenzautils.sif
 
 export REFERENCE=/reference/Gencode/gencode.hg38.v36.primary_assembly.fa
 export GC=/reference/Gencode/hg38.gc50Base.wig.gz
@@ -12,11 +12,11 @@ export tumour=/data/DFSP-001-T/DFSP-001-T_recalibrated.bam
 export normal=/data/DFSP-001-N/DFSP-001-N_recalibrated.bam
 sequenza_dir=/data/Sequenza
 
-# export REFERENCE=/home/zhonggr/projects/250224_DFSP_WES/data/reference/Gencode/gencode.hg38.v36.primary_assembly.fa
-# export GC=/home/zhonggr/projects/250224_DFSP_WES/data/reference/Gencode/hg38.gc50Base.wig.gz
-# export tumour=/home/zhonggr/projects/250224_DFSP_WES/test/DFSP-001-T/DFSP-001-T_recalibrated.bam
-# export normal=/home/zhonggr/projects/250224_DFSP_WES/test/DFSP-001-N/DFSP-001-N_recalibrated.bam
-# export sequenza_dir=/home/zhonggr/projects/250224_DFSP_WES/test/Sequenza
+# export REFERENCE=/home/zhonggr/projects/250224_sarcoma_multiomics/data/reference/Gencode/gencode.hg38.v36.primary_assembly.fa
+# export GC=/home/zhonggr/projects/250224_sarcoma_multiomics/data/reference/Gencode/hg38.gc50Base.wig.gz
+# export tumour=/home/zhonggr/projects/250224_sarcoma_multiomics/test/DFSP-001-T/DFSP-001-T_recalibrated.bam
+# export normal=/home/zhonggr/projects/250224_sarcoma_multiomics/test/DFSP-001-N/DFSP-001-N_recalibrated.bam
+# export sequenza_dir=/home/zhonggr/projects/250224_sarcoma_multiomics/test/Sequenza
 
 mkdir -p ${sequenza_dir}
 

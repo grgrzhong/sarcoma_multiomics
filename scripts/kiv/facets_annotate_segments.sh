@@ -9,7 +9,7 @@ fi
 
 ## Setup the working directory
 facet_dir=/home/zhonggr/projects/250224_sarcoma_multiomics/data/wes/cnv_facets
-# facet_dir=/home/zhonggr/projects/250224_DFSP_WES/data/wes/variant_calling/cnv/facets_test_normal
+# facet_dir=/home/zhonggr/projects/250224_sarcoma_multiomics/data/wes/variant_calling/cnv/facets_test_normal
 
 annotation=/mnt/m/Reference/Gencode/annotation_protein_coding.bed
 

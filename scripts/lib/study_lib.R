@@ -640,13 +640,13 @@ loadCancerHotspot <- function(
     if (is.null(hotspot)) {
 
         snv_hotspots <- read_xlsx(
-            here("data/clinical/hotspots_v2.xlsx"),
+            here("data/public/hotspots_v2.xlsx"),
             sheet = "SNV-hotspots"
         )
         
 
         indel_hotspots <- read_xlsx(
-            here("data/clinical/hotspots_v2.xlsx"),
+            here("data/public/hotspots_v2.xlsx"),
             sheet = "INDEL-hotspots"
         ) 
         
@@ -773,21 +773,21 @@ loadCancerHotspot <- function(
 }
 
 
-mergeAnnovarOutput <- function(
-    annovar_dir,
+collectAnnovarData <- function(
+    dir,
     is_save = FALSE,
     save_dir = "data/wes/annotation/merged"
 ) {
     
     ## The annovar directory should contain the annovar output files
-    annovar_dir <- here(annovar_dir)
+    dir <- here(dir)
 
-    input_files <- dir_ls(annovar_dir, recurse = TRUE, glob = "*annovar.txt")
+    input_files <- dir_ls(dir, recurse = TRUE, glob = "*annovar.txt")
     
     ## Collect all annovar output files
     message(
         "Collecting ", length(input_files),
-        " annovar output files from: ", annovar_dir
+        " annovar output files from: ", dir
     )
     
     maf_data <- annovarToMaf(input_files) |>
@@ -1000,46 +1000,234 @@ mergeAnnovarOutput <- function(
             .after = last_col()
         )
 
-    ## Save the data
-    if (is_save && !is.null(save_dir)) {
-        # Save the merged maf file
-        file_name <- "annovar_maf_merged.qs"
+    # ## Save the data
+    # if (is_save && !is.null(save_dir)) {
+    #     # Save the merged maf file
+    #     file_name <- "annovar_maf_merged.qs"
         
-        message(
-            "Saving merged annovar data: ", here(save_dir, file_name)
+    #     message(
+    #         "Saving merged annovar data: ", here(save_dir, file_name)
+    #     )
+
+    #     fs::dir_create(here(save_dir))
+        
+    #     qsave(maf_tbl, here(save_dir, file_name))
+    # }
+    
+    # Return a tibble
+    maf_tbl
+
+}
+
+filterAnnovarData <- function(data) {
+
+    annovar_tbl <- data
+    ## VAF >= 5% and VAD >= 4 and DP >=20 in the tumor samples
+    filter_data1 <- annovar_tbl |>
+        filter(
+            is.na(tumor_AF) | tumor_AF >= 0.05,
+            is.na(tumor_DP) | tumor_DP >= 20,
+            is.na(tumor_VAD) | tumor_VAD >= 4,
+            is.na(gnomAD_exome_ALL) | gnomAD_exome_ALL < 0.001
         )
 
-        fs::dir_create(here(save_dir))
-        
-        qsave(maf_tbl, here(save_dir, file_name))
-    }
-    
-    # Return a tibble
-    maf_tbl
+    # filter_data1 |> select(matches("tumor|normal|AF|VAD|DP"))
 
+    ## VAF <=1% and VAD <=1 in the paired normal samples
+    filter_data2 <- annovar_tbl |>
+        filter(!is_paired_normal) |>
+        filter(
+            is.na(normal_AF) | normal_AF <= 0.01,
+            is.na(normal_VAD) | normal_VAD <= 1
+        )
+
+    # filter_data2 |> select(matches("tumor|normal|AF|VAD|DP"))
+
+    ## Specific for tert promotor mutations
+    tert_gene <- filter_data1 |>
+        filter(Hugo_Symbol == "TERT") |>
+        filter(Func.refGene %in% c("exonic", "splicing", "upstream"))
+
+    ## Combine the filtered data
+    first_inclusion <- bind_rows(
+        filter_data1,
+        filter_data2,
+        tert_gene
+    ) |>
+        distinct()
+
+    ## All indel/splice site mutations
+    unique(first_inclusion$Variant_Classification)
+    unique(first_inclusion$ExonicFunc.refGene)
+    unique(first_inclusion$Variant_Type)
+    unique(first_inclusion$Func.refGene)
+
+    first_inclusion_splice <- first_inclusion |>
+        filter(Func.refGene %in% c("splicing"))
+
+    first_inclusion_indels <- first_inclusion |>
+        ## "SNP" "DEL" "INS" "DNP" "ONP"
+        filter(Variant_Type %in% c("DEL", "INS")) |>
+        ## "Missense_Mutation" "Silent" "In_Frame_Del" "Frame_Shift_Del" NA
+        ## "Frame_Shift_Ins" "Nonsense_Mutation" "In_Frame_Ins" "Nonstop_Mutation"
+        ## "Translation_Start_Site" "Unknown" "Inframe_INDEL"
+        filter(
+            Variant_Classification %in% c(
+                "In_Frame_Del",
+                "In_Frame_Ins",
+                "Inframe_INDEL",
+                "Frame_Shift_Del",
+                "Frame_Shift_Ins",
+                "Nonsense_Mutation",
+                "Nonstop_Mutation",
+                "Unknown",
+                NA,
+                "NA",
+                "Translation_Start_Site"
+            )
+        )
+
+    message(
+        "Number of indels/splice site mutations: ",
+        nrow(first_inclusion_indels) + nrow(first_inclusion_splice)
+    )
+
+    ##############################################################################
+    ## SNV filtering  ----------------
+    ##############################################################################
+    ## Exclude the synonymous SNVs
+    first_inclusion_snv <- first_inclusion |>
+        ## >=2 base substitution also include
+        filter(Variant_Type %in% c("SNP", "DNP", "ONP")) |>
+        filter(!(ExonicFunc.refGene %in% c("synonymous SNV")))
+
+    ## Deleteriousness functional impact or pathogenicity predictions
+    ## Check if variant meets at least 3 deleterious functional impact or pathogenic predictions
+    ## First options
+    second_inclusion_snv1 <- first_inclusion_snv |>
+        rowwise() |>
+        mutate(
+            deleterious_count = sum(
+                # CADD >= 20
+                (!is.na(CADD_phred) && CADD_phred >= 20),
+                # VEST3 criteria
+                (!is.na(VEST3_score) && VEST3_score >= 0.7) || (!is.na(VEST3_rankscore) && VEST3_rankscore >= 0.9),
+                # DANN >= 0.9
+                (!is.na(DANN_score) && DANN_score >= 0.9),
+                # SIFT prediction = "D" (Deleterious)
+                (!is.na(SIFT_pred) && SIFT_pred == "D"),
+                # Polyphen2 prediction = "P"/"D" (Possibly/Probably damaging)
+                (!is.na(Polyphen2_HVAR_pred) && Polyphen2_HVAR_pred %in% c("P", "D")) ||
+                    (!is.na(Polyphen2_HDIV_pred) && Polyphen2_HDIV_pred %in% c("P", "D")),
+                # MutationTaster prediction = "A"/"D" (Disease causing automatic/Disease causing)
+                (!is.na(MutationTaster_pred) && MutationTaster_pred %in% c("A", "D")),
+                # NA in at least one prediction algorithm qualifies
+                is.na(CADD_phred) || is.na(VEST3_score) || is.na(DANN_score) ||
+                    is.na(SIFT_pred) || is.na(Polyphen2_HVAR_pred) || is.na(Polyphen2_HDIV_pred) ||
+                    is.na(MutationTaster_pred)
+            )
+        ) |>
+        ungroup() |>
+        filter(deleterious_count >= 3)
+
+    message(
+        "Number of SNVs with at least 3 deleterious functional impact or pathogenic predictions: ",
+        nrow(second_inclusion_snv1)
+    )
+
+    ## Second options
+    ## CLNSIG, cancer hotspot, oncoKB, COSMIC
+    ## Filter by CLNSIG, cancer hotspot, oncoKB, COSMIC
+    second_inclusion_snv_clnsig <- first_inclusion_snv |>
+        filter(
+            CLNSIG %in% c(
+                "Pathogenic", "Likely_pathogenic", "Pathogenic/Likely_pathogenic"
+            )
+        )
+
+    ## COSMIC
+    # unique(first_inclusion_snv$cosmic70)
+    second_inclusion_snv_cosmic <- first_inclusion_snv |>
+        filter(!(cosmic70 %in% c(".")))
+
+    ## Cancer hotspot
+    snv_hotspots <- loadCancerHotspot()[["snv_hotspots"]]
+
+    dfsp_snv_hotsopts <- first_inclusion_snv |>
+        mutate(match_change = paste0(Hugo_Symbol, "_", aaChange)) |>
+        mutate(
+            is_hotspot = if_else(
+                match_change %in% snv_hotspots$snv_hotspot,
+                TRUE,
+                FALSE
+            )
+        ) |>
+        filter(is_hotspot)
+
+    second_inclusion_snv_hotspot <- dfsp_snv_hotsopts |>
+        select(-match_change, -is_hotspot)
+
+    message(
+        "Number of SNVs in cancer hotspots: ",
+        nrow(second_inclusion_snv_hotspot)
+    )
+
+    ## OncoKB
+    oncokb_gene_list <- "data/public/cancerGeneList.tsv"
+
+    oncokb_gene_list <- read_tsv(here(oncokb_gene_list)) |>
+        pull(`Hugo Symbol`)
+
+    second_inclusion_snv_oncokb <- first_inclusion_snv |>
+        mutate(
+            is_oncokb = if_else(
+                Hugo_Symbol %in% oncokb_gene_list,
+                TRUE,
+                FALSE
+            )
+        ) |>
+        filter(is_oncokb) |>
+        select(-is_oncokb)
+
+    message(
+        "Number of variants with oncoKB ",
+        nrow(second_inclusion_snv_oncokb)
+    )
+
+    snv_oncokb_uniq <- second_inclusion_snv_oncokb |>
+        select(Hugo_Symbol, aaChange) |>
+        distinct()
+
+    message(
+        "Number of unique OncoKB SNVs: ",
+        nrow(snv_oncokb_uniq)
+    )
+
+    # Combine all included variants
+    all_included_variants <- bind_rows(
+        first_inclusion_splice,
+        first_inclusion_indels,
+        second_inclusion_snv1,
+        second_inclusion_snv_clnsig,
+        second_inclusion_snv_cosmic,
+        second_inclusion_snv_hotspot,
+        second_inclusion_snv_oncokb
+    ) |>
+        distinct()
+
+    message(
+        "Total number of filtered variants: ",
+        nrow(annovar_tbl) - nrow(all_included_variants)
+    )
+
+    message(
+        "Total number of included variants: ",
+        nrow(all_included_variants)
+    )
+    
+    all_included_variants
 }
 
-loadMergedAnnovar <- function(
-    dir = "data/wes/annotation/merged",
-    filename = "annovar_maf_merged"
-) {
-
-    # Load the merged maf file
-    merged_maf <- here(dir, paste0(filename, ".qs"))
-    
-    if (!file.exists(merged_maf)) {
-    
-        stop("Merged maf file not found: ", merged_maf)
-    }
-    
-    message("Loading merged maf file: ", merged_maf)
-
-    # Load the merged maf file and Clean the AD column
-    maf_tbl <- qread(merged_maf)
-
-    # Return a tibble
-    maf_tbl
-}
 
 filterMergedMaf <- function(
     maf_tbl,
@@ -1293,7 +1481,52 @@ addDFSPGroupInfo <- function(maf_tbl) {
     maf_tbl
 }
 
-collectPCGRData <- function(
+collectPCGRCNAData <- function(
+    dir, 
+    sig_gain_thres = NULL
+) {
+
+    ## Get all the PCGR files in the directory
+    pcgr_files <- dir_ls(
+        dir,
+        glob = "*.cna_gene_ann.tsv.gz",
+        recurse = TRUE
+    )
+
+    cna_list <- list()
+
+    ## Loop through the files and read the data
+    for (file in pcgr_files) {
+
+        message("Processing file: ", file)
+        
+        if (!file.exists(file)) {
+            warning("File does not exist: ", file)
+            next
+        }
+
+        cna_data <- read_tsv(file, show_col_types = FALSE) |> 
+            mutate(
+                total_cnv = CN_MAJOR + CN_MINOR
+            )
+        
+        if (!is.null(sig_gain_thres)) {
+            cna_data <- cna_data |>
+                filter(total_cnv >=4 | total_cnv == 0)
+        }   
+
+        cna_list[[file]] <- cna_data
+
+    }
+    
+    cna_tbl <- list_rbind(cna_list) |> 
+        janitor::clean_names()
+
+    ## Return
+    cna_tbl
+}
+
+collectPCGRSNVINDELData <- function(
     dir, 
     sheet_name="SOMATIC_SNV_INDEL"
 ) {
@@ -1401,6 +1634,19 @@ filterPCGRData <- function(
         "Number of actionable variants in PCGR data: ", nrow(actionable_variants)
     )
     
+    tert_variants <- pcgr_data |>
+        filter(symbol == "TERT")
+
+    tp53_variants <- pcgr_data |>
+        filter(symbol == "TP53")
+    
+    colnames(pcgr_data)
+    
+    unique(pcgr_data$consequence)
+    unique(pcgr_data$loss_of_function)
+    unique(pcgr_data$coding_status)
+    unique(pcgr_data$exonic_status)
+
     ## OncoKB gene list
     oncokb_genes <- loadOncoKBGeneList()
     oncokb_genes <- pcgr_data |> 
@@ -1554,6 +1800,8 @@ filterPCGRData <- function(
     final_variants <- bind_rows(
         oncogenic_variants,
         actionable_variants,
+        tert_variants,
+        tp53_variants,
         filtered_indels,
         indel_actionability,
         indel_oncogenicity,
@@ -1902,5 +2150,193 @@ loadDFSPSampleGroups <- function() {
         Main.Met = Main.Met,
         FST = FST,
         FST.Group = FST.Group
+    )
+}
+
+loadMsigdbGeneSet <- function() {
+    ## Get all the potential gene sets
+    msigdb_gs <- bind_rows(
+        ### Hallmark gene set
+        msigdbr(
+            species = "Homo sapiens", 
+            collection = "H"
+        ),
+
+        ### Curated gene set, canonical pathways
+        msigdbr(
+            species = "Homo sapiens", 
+            collection = "C2", 
+            subcollection = "CP:KEGG_LEGACY"
+        ),
+        msigdbr(
+            species = "Homo sapiens", 
+            collection = "C2", 
+            subcollection = "CP:REACTOME"
+        ),
+
+        ### Go gene sets
+        msigdbr(
+            species = "Homo sapiens", 
+            # subcollection = "GO:BP",
+            collection = "C5"
+        )
+    )
+    
+    msigdb_gs <- msigdb_gs |>
+        dplyr::select(gs_name, gene_symbol, ncbi_gene, ensembl_gene) |> 
+        mutate(db_name = str_extract(gs_name, "^[^_]+")) |>
+        mutate(gs_name = str_extract(gs_name, "(?<=_).+"))
+    
+    msigdb_gs
+}
+
+cleanGeneSetName <- function(msigdb_gs) {
+        
+        # msigdb_gs |> 
+        #     filter(grepl("mhc_class", gs_name, ignore.case = TRUE))
+
+        msigdb_gs |> 
+            mutate(
+                gs_name = stringr::str_to_sentence(gs_name),
+                gs_name = gsub("Atp", "ATP", gs_name),
+                gs_name = gsub("atp", "ATP", gs_name),
+                gs_name = gsub("Pd_1", "PD-1", gs_name),
+                gs_name = gsub("orc_complex", "ORC_complex", gs_name),
+                gs_name = gsub("Sirt1", "SIRT1", gs_name),
+                gs_name = gsub("rrna_expression", "rRNA_expression", gs_name),
+                gs_name = gsub("mrna", "mRNA", gs_name),
+                gs_name = gsub("cap_binding_complex", "cap-binding_complex", gs_name),
+                gs_name = gsub("and_eifs", "and_eIFs", gs_name),
+                gs_name = gsub("Nonhomologous", "Non-homologous", gs_name),
+                gs_name = gsub("nhej", "NHEJ", gs_name),
+                gs_name = gsub("tca", "TCA", gs_name),
+                gs_name = gsub("Mtorc1", "mTORC1", gs_name),
+                gs_name = gsub("ar_androgen_receptor", "AR_androgen_receptor", gs_name),
+                gs_name = gsub("klk2_and_klk3", "KLK2_and_KLK3", gs_name),
+                gs_name = gsub("ap_site_formation", "AP_site_formation", gs_name),
+                gs_name = gsub("Activated_pkn1", "Activated_PKN1", gs_name),
+                gs_name = gsub("Hdms_demethylate", "HDMs_demethylate", gs_name),
+                gs_name = gsub("Er_to_golgi", "ER_to_golgi", gs_name),
+                gs_name = gsub("Gpcr", "GPCR", gs_name),
+                gs_name = gsub("mhc_protein", "MHC_protein ", gs_name),
+                gs_name = gsub("Mhc_class", "MHC_class", gs_name),
+                gs_name = gsub("mhc_class", "MHC_class", gs_name),
+                gs_name = gsub("Mhc_class_ii", "MHC_class_II", gs_name),
+                gs_name = gsub("Mhc_protein", "MHC_protein", gs_name),
+                gs_name = gsub("Apc_cdc20", "APC(Cdc20)", gs_name),
+                gs_name = gsub("nek2a", "Nek2A", gs_name),
+                gs_name = gsub("Il6", "IL6", gs_name),
+                gs_name = gsub("jak", "JAK", gs_name),
+                gs_name = gsub("jak_stat3", "JAK/STAT3", gs_name),
+                gs_name = gsub("stat3", "STAT3", gs_name),
+                gs_name = gsub("perk", "PERK", gs_name),
+                gs_name = gsub("trna", "tRNA", gs_name),
+                gs_name = gsub("Tnfa", "TNFα", gs_name),
+                gs_name = gsub("Tnfa", "TNFα", gs_name),
+                gs_name = gsub("nfkb", "NFkB", gs_name),
+                gs_name = gsub("E2f", "E2F", gs_name),
+                gs_name = gsub("e1", "E1", gs_name),
+                gs_name = gsub("e2", "E2", gs_name),
+                gs_name = gsub("Il2_stat5", "IL2_STAT5", gs_name),
+                gs_name = gsub("G2m", "G2/M", gs_name),
+                gs_name = gsub("eif2ak1_hri", "EIF2AK1 (HRI)", gs_name),
+                gs_name = gsub("sars_cov_1", "SARS-CoV-1", gs_name),
+                gs_name = gsub("sahf", "SAHF", gs_name),
+                gs_name = gsub("h3_k27", "H3K27", gs_name),
+                gs_name = gsub("Dna", "DNA", gs_name),
+                gs_name = gsub("dna", "DNA", gs_name),
+                gs_name = gsub("G1_s", "G1/S", gs_name),
+                gs_name = gsub("Kras", "KRAS", gs_name),
+                gs_name = gsub("cd4", "CD4", gs_name),
+                gs_name = gsub("t_cell", "T_cell", gs_name),
+                gs_name = gsub("gtpase", "GTPase", gs_name),
+                gs_name = gsub("Fcgr", "FcγR", gs_name),
+                gs_name = gsub("fcgr", "FcγR", gs_name),
+                gs_name = gsub("Tp53", "TP53", gs_name),
+                gs_name = gsub("Chk1_chk2_cds1", "Chk1/Chk2(Cds1)", gs_name),
+                gs_name = gsub("cyclin_b_cdk1", "Cyclin_B:Cdk1", gs_name),
+                gs_name = gsub("Nadph_", "NADPH_", gs_name),
+                gs_name = gsub("Nadp_", "NADP_", gs_name)
+            )
+}
+
+collectCNVFacets <- function(facet_dir) {
+
+    facet_files <- dir_ls(
+        facet_dir, 
+        glob = "*.annotated.tsv", 
+        recurse = TRUE
+    )
+
+    message("Collecting Facets CNV data from ", length(facet_files), " files")
+
+    cnv_facet_data <- tibble(
+        sample = path_file(facet_files) |> str_remove(".annotated.tsv"),
+        file = facet_files
+    ) |>
+        mutate(
+            data = map2(
+                sample,
+                file,
+                \(s, f) {
+                    message("Processing sample = ", s)
+                    read_tsv(f, show_col_types = FALSE)
+                },
+                .progress = TRUE
+            )
+        ) |> 
+        unnest(data) |> 
+        dplyr::select(-sample, -file) |> 
+        janitor::clean_names()
+
+    cnv_facet_data |>
+        dplyr::select(
+            "gene", "sample_id", "svtype", "chromosome", "start", "start_position", 
+            "end_position", "end"
+        ) |>
+        dplyr::rename(Gene = gene, Sample_name = sample_id, CN = svtype) |> 
+        distinct()
+
+}
+
+getDFSPSampleGroups <- function(sample_ids) {
+
+    ## Load clinical info
+    clinical_info <- loadDFSPClinicalInfo()
+
+    ## Get the sample groups for the given sample IDs
+    sample_idx <- match(sample_ids, clinical_info$Sample.ID)
+
+    ## Check if the sample_idx is valid
+    if (any(is.na(sample_idx))) {
+        stop("Some sample IDs are not found in the clinical info.")
+    }
+
+    ## "-----------------------------------------------------------------"
+    ## Metastaisis vs Non-Metastasis
+    ## "-----------------------------------------------------------------"
+    
+
+}
+
+loadDFSPWESSamples <- function() {
+
+    sample_info_dir <- "data/WES/sample_info"
+
+    paired_tumor_samples <- read_tsv(
+        here(sample_info_dir, "tumour_paired_samples.txt"),
+        col_names = FALSE,
+        show_col_types = FALSE
+    )
+
+    unpaired_tumor_samples <- read_tsv(
+        here(sample_info_dir, "tumour_unpaired_samples.txt"),
+        col_names = FALSE,
+        show_col_types = FALSE
+    )
+
+    list(
+        paired = paired_tumor_samples$X1,
+        unpaired = unpaired_tumor_samples$X1
     )
 }
