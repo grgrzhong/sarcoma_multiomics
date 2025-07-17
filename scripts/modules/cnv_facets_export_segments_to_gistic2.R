@@ -98,6 +98,14 @@ output_tsv <- input_tsv |>
             dplyr::select(
                 Chromosome, Start = Start_fixed, End = End_fixed, 
                 Num_Probes, Segment_Mean
+            ) |> 
+            ## Keep data types consistent
+            mutate(
+                Chromosome = as.character(Chromosome),
+                Start = as.integer(Start),
+                End = as.integer(End),
+                Num_Probes = as.integer(Num_Probes),
+                Segment_Mean = as.numeric(Segment_Mean)
             )
 
 # Write output to TSV file    

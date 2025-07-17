@@ -138,7 +138,7 @@ cnv_facets() {
         #         --output "${pcgr_tsv}"
 
         ## Prepare the segments for GISTIC2 input
-        echo "$(date +"%F") $(date +"%T") - (${tumour_id}) Preparing segments for GISTIC2 input ..."
+        echo "$(date +"%F") $(date +"%T") - (${tumour_id}) Exporting segments for GISTIC2 input ..."
         
         gistic2_tsv="${CNV_FACETS_DIR}/${tumour_id}/${tumour_id}.gistic2.tsv"
 

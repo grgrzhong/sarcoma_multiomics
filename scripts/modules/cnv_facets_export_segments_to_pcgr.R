@@ -12,6 +12,7 @@
 suppressPackageStartupMessages(
     suppressWarnings({
         library(optparse)
+        library(fs)
         library(tidyverse)
     })
 )

@@ -12,7 +12,7 @@ out_plot_dir <- "figures/wes"
 ## "=========================================================================="
 annovar_dir <- "data/wes/mutect2"
 annovar_tbl <- collectAnnovarData(dir = annovar_dir)
-saveData(
+SaveData(
     annovar_tbl, 
     dir = out_data_dir, 
     filename = "dfsp_wes_annovar_cohort_merged_tbl"
@@ -21,14 +21,14 @@ saveData(
 ## "=========================================================================="
 ## Filter variants ----
 ## "=========================================================================="
-annovar_tbl <- loadData(
+annovar_tbl <- LoadData(
     dir = out_data_dir, 
     filename = "dfsp_wes_annovar_cohort_merged_tbl"
 )
 
 filtered_variants <- filterAnnovarData(data = annovar_tbl)
 
-saveData(
+SaveData(
     filtered_variants, 
     here(out_dir, "dfsp_wes_annovar_cohort_merged_tbl_included")
 )

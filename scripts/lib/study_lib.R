@@ -11,6 +11,7 @@ suppressPackageStartupMessages(
         library(ggpubr)
         library(rstatix)
         library(ggrepel)
+        library(Cairo)
         library(tidyverse)
     })
 )
@@ -18,7 +19,7 @@ suppressPackageStartupMessages(
 options(scipen = 999) # Disable scientific notation globally
 
 
-savePlot <- function(
+SavePlot <- function(
     plot, width = 8, height = 6, only_png = FALSE, dir, filename) {
     ### Save png or pdf plots using ggplot2
 
@@ -342,7 +343,7 @@ plotVariantFilter <- function(
         )
 
     if (is_save) {
-        savePlot(
+        SavePlot(
             plot = p,
             width = 4,
             height = 3,
@@ -1457,7 +1458,7 @@ loadDFSPGroupInfo <- function() {
 addDFSPGroupInfo <- function(maf_tbl) {
 
     ## Load the sample group info
-    clinical_info <- loadDFSPClinicalInfo()
+    clinical_info <- LoadDFSPClinicalInfo()
 
     group_info <- clinical_info |> 
         dplyr::select(Sample.ID, FST.Group) |> 
@@ -1953,7 +1954,7 @@ convertPCGRToMaftools <- function(pcgr_tbl) {
 
 }
 
-loadDFSPClinicalInfo <- function() {
+LoadDFSPClinicalInfo <- function() {
 
     file <- "data/clinical/DFSP_WES_clinical.csv"
 
@@ -1975,7 +1976,7 @@ loadDFSPClinicalInfo <- function() {
     clinical_info
 }
 
-saveData <- function(obj, dir, filename) {
+SaveData <- function(obj, dir, filename) {
     
     ## Save data to qs file
 
@@ -1984,7 +1985,7 @@ saveData <- function(obj, dir, filename) {
     qsave(obj, here(dir, paste0(filename, ".qs")))
 }
 
-loadData <- function(dir, filename) {
+LoadData <- function(dir, filename) {
     
     ## Load qs data
     qread(here(dir, paste0(filename, ".qs")))
@@ -2114,43 +2115,23 @@ loadDFSPColorConfigs <- function() {
     )
 }
 
-loadDFSPSampleGroups <- function() {
+LoadDFSPSampleGroups <- function() {
 
-    ## Load clincical info
-    # clinical_info <- loadDFSPClinicalInfo()
+    file <- here("data/clinical/DFSP_WES_sample_groups.xlsx")
+    
+    groups <- excel_sheets(file)
 
-    # group_pairs <- combn(groups, 2, simplify = FALSE)
+    sample_groups <- map(
+        groups,
+        \(sheet) {
+            read_excel(file, sheet = sheet, col_names = TRUE) |>
+                pull(Sample.ID)
+        }
+    ) |> 
+        set_names(groups)
 
-    ## Non-Metastasis vs Metastasis
-    Metastasis <- list(
-        "Non-Metastasis vs Metastasis" = c("No", "Yes")
-    )
-
-    Main.Met <- list(
-        "No vs Yes" = c("No", "Yes")
-    )
-
-    ## Non-FST vs FST
-    FST <- list(
-        "No vs Yes" = c("No", "Yes")
-    )
-
-    ## FST transformation groups
-    FST.Group <- list(
-        "U-DFSP vs Pre-FST"    = c("U-DFSP", "Pre-FST"),
-        "U-DFSP vs Post-FST"   = c("U-DFSP", "Post-FST"),
-        "U-DFSP vs FS-DFSP"    = c("U-DFSP", "FS-DFSP"),
-        "Pre-FST vs Post-FST"  = c("Pre-FST", "Post-FST"),
-        "Pre-FST vs FS-DFSP"   = c("Pre-FST", "FS-DFSP"),
-        "Post-FST vs FS-DFSP"  = c("Post-FST", "FS-DFSP")
-    )
-
-    list(
-        Metastasis = Metastasis,
-        Main.Met = Main.Met,
-        FST = FST,
-        FST.Group = FST.Group
-    )
+    # return
+    sample_groups
 }
 
 loadMsigdbGeneSet <- function() {
@@ -2302,7 +2283,7 @@ collectCNVFacets <- function(facet_dir) {
 getDFSPSampleGroups <- function(sample_ids) {
 
     ## Load clinical info
-    clinical_info <- loadDFSPClinicalInfo()
+    clinical_info <- LoadDFSPClinicalInfo()
 
     ## Get the sample groups for the given sample IDs
     sample_idx <- match(sample_ids, clinical_info$Sample.ID)
@@ -2339,4 +2320,817 @@ loadDFSPWESSamples <- function() {
         paired = paired_tumor_samples$X1,
         unpaired = unpaired_tumor_samples$X1
     )
+}
+
+## DEPRECATED: Old comparison functions replaced by compare_gistic_transformation()
+## Use compare_gistic_transformation() for comprehensive GISTIC comparison analysis
+
+## Updated function to compare GISTIC results between groups
+compare_gistic_groups <- function(untransformed_gistic, transformed_gistic,
+                                  output_prefix = "fst_transformation",
+                                  untrans_total_samples = NULL,
+                                  trans_total_samples = NULL) {
+
+    library(dplyr)
+    
+    ## Extract amplification and deletion data
+    gistic_summary_untrans <- getCytobandSummary(untransformed_gistic)
+    gistic_summary_trans <- getCytobandSummary(transformed_gistic)
+    
+    ## Separate amplifications and deletions
+    untrans_amp <- gistic_summary_untrans %>% 
+        filter(Variant_Classification == "Amp")
+    untrans_del <- gistic_summary_untrans %>% 
+        filter(Variant_Classification == "Del")
+    
+    trans_amp <- gistic_summary_trans %>% 
+        filter(Variant_Classification == "Amp")
+    trans_del <- gistic_summary_trans %>% 
+        filter(Variant_Classification == "Del")
+
+    ## Get actual sample counts if not provided
+    if (is.null(untrans_total_samples)) {
+        untrans_total_samples <- length(getSampleSummary(untransformed_gistic)$Tumor_Sample_Barcode)
+    }
+    if (is.null(trans_total_samples)) {
+        trans_total_samples <- length(getSampleSummary(transformed_gistic)$Tumor_Sample_Barcode)
+    }
+
+    ## Compare amplifications
+    amp_comparison <- compare_cna_by_type(untrans_amp, trans_amp, "Amplification",
+                                         untrans_total_samples, trans_total_samples)
+
+    ## Compare deletions
+    del_comparison <- compare_cna_by_type(untrans_del, trans_del, "Deletion",
+                                         untrans_total_samples, trans_total_samples)
+
+    ## Combine results
+    transformation_cnas <- rbind(amp_comparison, del_comparison)
+
+    ## Create results directory if it doesn't exist
+    dir.create(here("results"), recursive = TRUE, showWarnings = FALSE)
+
+    ## Save results
+    write.table(transformation_cnas,
+        here("results", paste0(output_prefix, "_cna_comparison.txt")),
+        sep = "\t", row.names = FALSE, quote = FALSE
+    )
+
+    return(transformation_cnas)
+}
+
+## Updated helper function with correct sample totals
+compare_cna_frequencies_updated <- function(untrans_data, trans_data, alteration_type,
+                                           untrans_total_samples, trans_total_samples) {
+    ## Get all unique cytobands
+    all_cytobands <- unique(c(untrans_data$Cytoband, trans_data$Cytoband))
+
+    comparison_results <- data.frame()
+
+    for (cytoband in all_cytobands) {
+        ## Get sample counts for this cytoband
+        untrans_count <- ifelse(cytoband %in% untrans_data$Cytoband,
+                               untrans_data$nSamples[untrans_data$Cytoband == cytoband], 0
+        )
+        trans_count <- ifelse(cytoband %in% trans_data$Cytoband,
+                             trans_data$nSamples[trans_data$Cytoband == cytoband], 0
+        )
+
+        ## Calculate actual frequencies
+        untrans_freq <- untrans_count / untrans_total_samples
+        trans_freq <- trans_count / trans_total_samples
+        freq_diff <- trans_freq - untrans_freq
+
+        ## Get q-values
+        untrans_qval <- ifelse(cytoband %in% untrans_data$Cytoband,
+                              untrans_data$qvalues[untrans_data$Cytoband == cytoband], 1
+        )
+        trans_qval <- ifelse(cytoband %in% trans_data$Cytoband,
+                            trans_data$qvalues[trans_data$Cytoband == cytoband], 1
+        )
+
+        ## Get gene counts
+        untrans_genes <- ifelse(cytoband %in% untrans_data$Cytoband,
+                               untrans_data$nGenes[untrans_data$Cytoband == cytoband], 0
+        )
+        trans_genes <- ifelse(cytoband %in% trans_data$Cytoband,
+                             trans_data$nGenes[trans_data$Cytoband == cytoband], 0
+        )
+
+        ## Get wide peak limits
+        untrans_peak <- ifelse(cytoband %in% untrans_data$Cytoband,
+                              as.character(untrans_data$Wide_Peak_Limits[untrans_data$Cytoband == cytoband]), ""
+        )
+        trans_peak <- ifelse(cytoband %in% trans_data$Cytoband,
+                            as.character(trans_data$Wide_Peak_Limits[trans_data$Cytoband == cytoband]), ""
+
+        )
+
+        comparison_results <- rbind(comparison_results, data.frame(
+            cytoband = cytoband,
+            alteration_type = alteration_type,
+            untransformed_count = untrans_count,
+            transformed_count = trans_count,
+            untransformed_total = untrans_total_samples,
+            transformed_total = trans_total_samples,
+            untransformed_freq = round(untrans_freq, 3),
+            transformed_freq = round(trans_freq, 3),
+            frequency_difference = round(freq_diff, 3),
+            untransformed_qval = untrans_qval,
+            transformed_qval = trans_qval,
+            untransformed_genes = untrans_genes,
+            transformed_genes = trans_genes,
+            untransformed_peak = untrans_peak,
+            transformed_peak = trans_peak,
+            transformation_enriched = freq_diff > 0.2, # >20% difference
+            significant_in_transformed = trans_qval < 0.25,
+            significant_in_untransformed = untrans_qval < 0.25
+        ))
+    }
+
+    return(comparison_results)
+}
+
+## Function to get gene-level differences (updated)
+compare_gistic_genes <- function(untransformed_gistic, transformed_gistic) {
+    ## Initialize results
+    amp_specific <- character(0)
+    del_specific <- character(0)
+    amp_enriched <- data.frame()
+    del_enriched <- data.frame()
+
+    ## Try to extract gene data from GISTIC objects using getGeneSummary()
+    tryCatch({
+        ## Get gene-level data using getGeneSummary function
+        untrans_gene_summary <- getGeneSummary(untransformed_gistic)
+        trans_gene_summary <- getGeneSummary(transformed_gistic)
+        
+        ## Separate amplifications and deletions
+        untrans_amp_genes <- untrans_gene_summary %>% filter(Variant_Classification == "Amp")
+        untrans_del_genes <- untrans_gene_summary %>% filter(Variant_Classification == "Del")
+        trans_amp_genes <- trans_gene_summary %>% filter(Variant_Classification == "Amp")
+        trans_del_genes <- trans_gene_summary %>% filter(Variant_Classification == "Del")
+
+        ## Compare amplified genes
+        if (nrow(untrans_amp_genes) > 0 && nrow(trans_amp_genes) > 0) {
+            amp_specific <- setdiff(trans_amp_genes$Hugo_Symbol, untrans_amp_genes$Hugo_Symbol)
+            amp_enriched <- find_enriched_genes(untrans_amp_genes, trans_amp_genes)
+        } else if (nrow(trans_amp_genes) > 0) {
+            amp_specific <- trans_amp_genes$Hugo_Symbol
+        }
+
+        ## Compare deleted genes
+        if (nrow(untrans_del_genes) > 0 && nrow(trans_del_genes) > 0) {
+            del_specific <- setdiff(trans_del_genes$Hugo_Symbol, untrans_del_genes$Hugo_Symbol)
+            del_enriched <- find_enriched_genes(untrans_del_genes, trans_del_genes)
+        } else if (nrow(trans_del_genes) > 0) {
+            del_specific <- trans_del_genes$Hugo_Symbol
+        }
+        
+    }, error = function(e) {
+        message("Could not extract gene-level data from GISTIC objects: ", e$message)
+        message("Skipping gene-level comparison")
+    })
+
+    ## Find transformation-specific genes
+    transformation_specific_genes <- list(
+        amp_specific = amp_specific,
+        del_specific = del_specific,
+        amp_enriched = amp_enriched,
+        del_enriched = del_enriched
+    )
+
+    return(transformation_specific_genes)
+}
+
+## Updated helper function to find enriched genes
+find_enriched_genes <- function(untrans_genes, trans_genes) {
+    
+    if (nrow(untrans_genes) == 0 || nrow(trans_genes) == 0) {
+        return(data.frame())
+    }
+    
+    common_genes <- intersect(untrans_genes$Hugo_Symbol, trans_genes$Hugo_Symbol)
+
+    if (length(common_genes) == 0) {
+        return(data.frame())
+    }
+
+    enriched <- data.frame()
+
+    for (gene in common_genes) {
+        # Check if freq column exists, if not try other frequency-related columns
+        if ("freq" %in% colnames(untrans_genes)) {
+            untrans_freq <- untrans_genes$freq[untrans_genes$Hugo_Symbol == gene]
+            trans_freq <- trans_genes$freq[trans_genes$Hugo_Symbol == gene]
+        } else if ("Frequency" %in% colnames(untrans_genes)) {
+            untrans_freq <- untrans_genes$Frequency[untrans_genes$Hugo_Symbol == gene]
+            trans_freq <- trans_genes$Frequency[trans_genes$Hugo_Symbol == gene]
+        } else {
+            # Calculate frequency based on sample counts if available
+            message("Frequency column not found, skipping gene-level comparison")
+            return(data.frame())
+        }
+
+        if (length(trans_freq) > 0 && length(untrans_freq) > 0 && 
+            trans_freq > untrans_freq + 0.2) { # >20% increase
+            enriched <- rbind(enriched, data.frame(
+                gene = gene,
+                untransformed_freq = round(untrans_freq, 3),
+                transformed_freq = round(trans_freq, 3),
+                frequency_difference = round(trans_freq - untrans_freq, 3),
+                fold_enrichment = ifelse(untrans_freq > 0, round(trans_freq / untrans_freq, 2), Inf),
+                stringsAsFactors = FALSE
+            ))
+        }
+    }
+
+    return(enriched)
+}
+
+## Function to perform comprehensive GISTIC comparison between transformed and untransformed groups
+compare_gistic_transformation <- function(untransformed_gistic, transformed_gistic,
+                                        output_prefix = "fst_transformation",
+                                        freq_threshold = 0.2, qval_threshold = 0.25) {
+    
+    library(dplyr)
+    library(ggplot2)
+    
+    message("Starting comprehensive GISTIC transformation analysis...")
+    
+    ## Create results directory if it doesn't exist
+    dir.create(here("results"), recursive = TRUE, showWarnings = FALSE)
+    dir.create(here("figures/wes/gistic2/comparative"), recursive = TRUE, showWarnings = FALSE)
+    
+    ## Get sample counts for proper frequency calculation
+    untrans_total_samples <- length(getSampleSummary(untransformed_gistic)$Tumor_Sample_Barcode)
+    trans_total_samples <- length(getSampleSummary(transformed_gistic)$Tumor_Sample_Barcode)
+    
+    message(paste("Untransformed samples:", untrans_total_samples))
+    message(paste("Transformed samples:", trans_total_samples))
+    
+    ## Extract cytoband-level data
+    gistic_summary_untrans <- getCytobandSummary(untransformed_gistic)
+    gistic_summary_trans <- getCytobandSummary(transformed_gistic)
+    
+    ## Separate amplifications and deletions
+    untrans_amp <- gistic_summary_untrans %>% filter(Variant_Classification == "Amp")
+    untrans_del <- gistic_summary_untrans %>% filter(Variant_Classification == "Del")
+    trans_amp <- gistic_summary_trans %>% filter(Variant_Classification == "Amp")
+    trans_del <- gistic_summary_trans %>% filter(Variant_Classification == "Del")
+
+    ## Compare amplifications and deletions
+    amp_comparison <- compare_cna_by_type(untrans_amp, trans_amp, "Amplification",
+                                         untrans_total_samples, trans_total_samples,
+                                         freq_threshold, qval_threshold)
+    
+    del_comparison <- compare_cna_by_type(untrans_del, trans_del, "Deletion",
+                                         untrans_total_samples, trans_total_samples,
+                                         freq_threshold, qval_threshold)
+    
+    ## Combine cytoband results
+    cytoband_results <- rbind(amp_comparison, del_comparison)
+    
+    ## Gene-level analysis
+    gene_results <- compare_genes_between_groups(untransformed_gistic, transformed_gistic,
+                                                freq_threshold)
+    
+    ## Statistical testing (Fisher's exact test for each cytoband)
+    cytoband_results <- add_statistical_testing(cytoband_results)
+    
+    ## Save results
+    write.table(cytoband_results,
+               here("results", paste0(output_prefix, "_cytoband_comparison.txt")),
+               sep = "\t", row.names = FALSE, quote = FALSE)
+    
+    saveRDS(gene_results, here("results", paste0(output_prefix, "_gene_comparison.rds")))
+    
+    ## Create summary tables
+    transformation_enriched <- cytoband_results %>%
+        filter(transformation_enriched == TRUE, significant_in_transformed == TRUE) %>%
+        arrange(desc(frequency_difference))
+    
+    transformation_specific <- cytoband_results %>%
+        filter(untransformed_count == 0, transformed_count > 0, significant_in_transformed == TRUE) %>%
+        arrange(desc(transformed_freq))
+    
+    ## Save summary tables
+    write.table(transformation_enriched,
+               here("results", paste0(output_prefix, "_enriched_cytobands.txt")),
+               sep = "\t", row.names = FALSE, quote = FALSE)
+    
+    write.table(transformation_specific,
+               here("results", paste0(output_prefix, "_specific_cytobands.txt")),
+               sep = "\t", row.names = FALSE, quote = FALSE)
+    
+    ## Create visualization
+    create_transformation_plots(cytoband_results, output_prefix)
+    
+    ## Print summary
+    message("=== FST Transformation Analysis Summary ===")
+    message(paste("Total cytobands analyzed:", nrow(cytoband_results)))
+    message(paste("Transformation-enriched cytobands:", nrow(transformation_enriched)))
+    message(paste("Transformation-specific cytobands:", nrow(transformation_specific)))
+    message(paste("Transformation-specific amplified genes:", length(gene_results$amp_specific)))
+    message(paste("Transformation-specific deleted genes:", length(gene_results$del_specific)))
+    message(paste("Enriched amplified genes:", nrow(gene_results$amp_enriched)))
+    message(paste("Enriched deleted genes:", nrow(gene_results$del_enriched)))
+    
+    ## Return comprehensive results
+    results <- list(
+        cytoband_comparison = cytoband_results,
+        transformation_enriched = transformation_enriched,
+        transformation_specific = transformation_specific,
+        gene_comparison = gene_results,
+        summary = list(
+            untransformed_samples = untrans_total_samples,
+            transformed_samples = trans_total_samples,
+            enriched_cytobands = nrow(transformation_enriched),
+            specific_cytobands = nrow(transformation_specific)
+        )
+    )
+    
+    return(results)
+}
+
+## Helper function to compare CNAs by type
+compare_cna_by_type <- function(untrans_data, trans_data, alteration_type,
+                               untrans_total_samples, trans_total_samples,
+                               freq_threshold, qval_threshold) {
+    
+    ## Get all unique cytobands
+    all_cytobands <- unique(c(untrans_data$Cytoband, trans_data$Cytoband))
+    
+    comparison_results <- data.frame()
+    
+    for (cytoband in all_cytobands) {
+        ## Get sample counts for this cytoband
+        untrans_count <- ifelse(cytoband %in% untrans_data$Cytoband,
+                               untrans_data$nSamples[untrans_data$Cytoband == cytoband], 0
+        )
+        trans_count <- ifelse(cytoband %in% trans_data$Cytoband,
+                             trans_data$nSamples[trans_data$Cytoband == cytoband], 0
+        )
+        
+        ## Calculate actual frequencies
+        untrans_freq <- untrans_count / untrans_total_samples
+        trans_freq <- trans_count / trans_total_samples
+        freq_diff <- trans_freq - untrans_freq
+        
+        ## Get q-values
+        untrans_qval <- ifelse(cytoband %in% untrans_data$Cytoband,
+                              untrans_data$qvalues[untrans_data$Cytoband == cytoband], 1
+        )
+        trans_qval <- ifelse(cytoband %in% trans_data$Cytoband,
+                            trans_data$qvalues[trans_data$Cytoband == cytoband], 1
+        )
+        
+        ## Get additional information
+        untrans_genes <- ifelse(cytoband %in% untrans_data$Cytoband,
+                               untrans_data$nGenes[untrans_data$Cytoband == cytoband], 0
+        )
+        trans_genes <- ifelse(cytoband %in% trans_data$Cytoband,
+                             trans_data$nGenes[trans_data$Cytoband == cytoband], 0
+        )
+        
+        untrans_peak <- ifelse(cytoband %in% untrans_data$Cytoband,
+                              as.character(untrans_data$Wide_Peak_Limits[untrans_data$Cytoband == cytoband]), "")
+        trans_peak <- ifelse(cytoband %in% trans_data$Cytoband,
+                            as.character(trans_data$Wide_Peak_Limits[trans_data$Cytoband == cytoband]), ""
+        )
+
+        comparison_results <- rbind(comparison_results, data.frame(
+            cytoband = cytoband,
+            alteration_type = alteration_type,
+            untransformed_count = untrans_count,
+            transformed_count = trans_count,
+            untransformed_total = untrans_total_samples,
+            transformed_total = trans_total_samples,
+            untransformed_freq = round(untrans_freq, 3),
+            transformed_freq = round(trans_freq, 3),
+            frequency_difference = round(freq_diff, 3),
+            fold_change = ifelse(untrans_freq > 0, round(trans_freq / untrans_freq, 2), Inf),
+            untransformed_qval = untrans_qval,
+            transformed_qval = trans_qval,
+            untransformed_genes = untrans_genes,
+            transformed_genes = trans_genes,
+            untransformed_peak = untrans_peak,
+            transformed_peak = trans_peak,
+            transformation_enriched = freq_diff > freq_threshold,
+            significant_in_transformed = trans_qval < qval_threshold,
+            significant_in_untransformed = untrans_qval < qval_threshold,
+            transformation_specific = untrans_count == 0 & trans_count > 0,
+            stringsAsFactors = FALSE
+        ))
+    }
+    
+    return(comparison_results)
+}
+
+## Helper function to compare genes between groups
+compare_genes_between_groups <- function(untransformed_gistic, transformed_gistic, freq_threshold) {
+    
+    ## Initialize results
+    amp_specific <- character(0)
+    del_specific <- character(0)
+    amp_enriched <- data.frame()
+    del_enriched <- data.frame()
+    
+    ## Try to extract gene data from GISTIC objects using getGeneSummary()
+    tryCatch({
+        ## Get gene-level data using getGeneSummary function
+        untrans_gene_summary <- getGeneSummary(untransformed_gistic)
+        trans_gene_summary <- getGeneSummary(transformed_gistic)
+        
+
+        ## Separate amplifications and deletions
+        untrans_amp_genes <- untrans_gene_summary %>% filter(Del == 0)
+        untrans_del_genes <- untrans_gene_summary %>% filter(Amp == 0)
+        trans_amp_genes <- trans_gene_summary %>% filter(Del == 0)
+        trans_del_genes <- trans_gene_summary %>% filter(Amp == 0)
+        
+        ## Compare amplified genes
+        if (nrow(untrans_amp_genes) > 0 && nrow(trans_amp_genes) > 0) {
+            amp_specific <- setdiff(trans_amp_genes$Hugo_Symbol, untrans_amp_genes$Hugo_Symbol)
+            amp_enriched <- find_enriched_genes_helper(untrans_amp_genes, trans_amp_genes, freq_threshold)
+        } else if (nrow(trans_amp_genes) > 0) {
+            # If no untransformed amplified genes, all transformed genes are specific
+            amp_specific <- trans_amp_genes$Hugo_Symbol
+        }
+        
+        ## Compare deleted genes
+        if (nrow(untrans_del_genes) > 0 && nrow(trans_del_genes) > 0) {
+            del_specific <- setdiff(trans_del_genes$Hugo_Symbol, untrans_del_genes$Hugo_Symbol)
+            del_enriched <- find_enriched_genes_helper(untrans_del_genes, trans_del_genes, freq_threshold)
+        } else if (nrow(trans_del_genes) > 0) {
+            # If no untransformed deleted genes, all transformed genes are specific
+            del_specific <- trans_del_genes$Hugo_Symbol
+        }
+        
+    }, error = function(e) {
+        message("Could not extract gene-level data from GISTIC objects: ", e$message)
+        message("Skipping gene-level comparison")
+    })
+    
+    return(list(
+        amp_specific = amp_specific,
+        del_specific = del_specific,
+        amp_enriched = amp_enriched,
+        del_enriched = del_enriched
+    ))
+}
+
+## Helper function to find enriched genes
+find_enriched_genes_helper <- function(untrans_genes, trans_genes, freq_threshold) {
+    
+    if (is.null(untrans_genes) || is.null(trans_genes) || 
+        nrow(untrans_genes) == 0 || nrow(trans_genes) == 0) {
+        return(data.frame())
+    }
+    
+    common_genes <- intersect(untrans_genes$Hugo_Symbol, trans_genes$Hugo_Symbol)
+    if (length(common_genes) == 0) {
+        return(data.frame())
+    }
+    
+    enriched <- data.frame()
+    
+    for (gene in common_genes) {
+        untrans_idx <- which(untrans_genes$Hugo_Symbol == gene)
+        trans_idx <- which(trans_genes$Hugo_Symbol == gene)
+        
+        if (length(untrans_idx) > 0 && length(trans_idx) > 0) {
+            # GISTIC gene data typically has frequency information
+            # Check for different possible column names
+            if ("freq" %in% colnames(untrans_genes)) {
+                untrans_freq <- untrans_genes$freq[untrans_idx[1]]
+                trans_freq <- trans_genes$freq[trans_idx[1]]
+            } else if ("frequency" %in% colnames(untrans_genes)) {
+                untrans_freq <- untrans_genes$frequency[untrans_idx[1]]
+                trans_freq <- trans_genes$frequency[trans_idx[1]]
+            } else if ("Frequency" %in% colnames(untrans_genes)) {
+                untrans_freq <- untrans_genes$Frequency[untrans_idx[1]]
+                trans_freq <- trans_genes$Frequency[trans_idx[1]]
+            } else {
+                # If no frequency column, skip this comparison
+                message("No frequency column found in gene data, skipping enrichment analysis")
+                return(data.frame())
+            }
+            
+            # Calculate frequency difference
+            freq_diff <- trans_freq - untrans_freq
+            
+            if (!is.na(freq_diff) && freq_diff > freq_threshold) {
+                enriched <- rbind(enriched, data.frame(
+                    gene = gene,
+                    untransformed_freq = round(untrans_freq, 3),
+                    transformed_freq = round(trans_freq, 3),
+                    frequency_difference = round(freq_diff, 3),
+                    fold_enrichment = ifelse(untrans_freq > 0, round(trans_freq / untrans_freq, 2), Inf),
+                    stringsAsFactors = FALSE
+                ))
+            }
+        }
+    }
+    
+    return(enriched)
+}
+
+## Helper function to add Fisher's exact test
+add_statistical_testing <- function(cytoband_results) {
+    
+    cytoband_results$fisher_pvalue <- NA
+    cytoband_results$fisher_odds_ratio <- NA
+    
+    for (i in 1:nrow(cytoband_results)) {
+        row <- cytoband_results[i, ]
+        
+        ## Create contingency table
+        contingency_table <- matrix(c(
+            row$transformed_count, row$transformed_total - row$transformed_count,
+            row$untransformed_count, row$untransformed_total - row$untransformed_count
+        ), nrow = 2, byrow = TRUE)
+        
+        ## Perform Fisher's exact test
+        if (sum(contingency_table) > 0) {
+            fisher_result <- fisher.test(contingency_table)
+            cytoband_results$fisher_pvalue[i] <- fisher_result$p.value
+            cytoband_results$fisher_odds_ratio[i] <- fisher_result$estimate
+        }
+    }
+    
+    ## Add FDR correction
+    cytoband_results$fisher_qvalue <- p.adjust(cytoband_results$fisher_pvalue, method = "BH")
+    
+    return(cytoband_results)
+}
+
+## Helper function to create visualization plots
+create_transformation_plots <- function(cytoband_results, output_prefix) {
+    
+    ## Filter for significant results
+    significant_results <- cytoband_results %>%
+        filter(transformation_enriched == TRUE, significant_in_transformed == TRUE) %>%
+        arrange(desc(frequency_difference)) %>%
+        head(20)  # Top 20 for visualization
+    
+    if (nrow(significant_results) > 0) {
+        ## Create bar plot
+        p <- ggplot(significant_results, aes(x = reorder(cytoband, frequency_difference), 
+                                           y = frequency_difference)) +
+            geom_col(aes(fill = alteration_type)) +
+            coord_flip() +
+            scale_fill_manual(values = c("Amplification" = "#D95F02", "Deletion" = "#1B9E77")) +
+            labs(title = "FST Transformation-Enriched CNAs",
+                 subtitle = paste("Top", nrow(significant_results), "cytobands with >20% frequency difference"),
+                 x = "Cytogenetic Band",
+                 y = "Frequency Difference (Transformed - Untransformed)",
+                 fill = "Alteration Type") +
+            theme_minimal() +
+            theme(axis.text.y = element_text(size = 8))
+        
+        ## Save plot
+        for (img in c("png", "pdf")) {
+            file <- here("figures/wes/gistic2/comparative", 
+                        paste0(output_prefix, "_enriched_cnas.", img))
+            
+            if (img == "png") {
+                CairoPNG(file = file, width = 10, height = 8, res = 300, units = "in")
+            } else {
+                CairoPDF(file = file, width = 10, height = 8)
+            }
+            
+            print(p)
+            dev.off()
+        }
+        
+        message(paste("Saved plot:", file))
+    } else {
+        message("No significant transformation-enriched CNAs found for plotting")
+    }
+}
+
+GetStatResGistic2 <- function(
+    gistic_dir,
+    group1,
+    group2,
+    freq_thres = 0.2,
+    qval_thres = 0.25
+) {
+
+    ## Load GISTIC data in maftools objects
+    g1_obj <- readGistic(
+        gisticAllLesionsFile = here(gistic_dir, group1, "all_lesions.conf_99.txt"),
+        gisticAmpGenesFile = here(gistic_dir, group1, "amp_genes.conf_99.txt"),
+        gisticDelGenesFile = here(gistic_dir, group1, "del_genes.conf_99.txt"),
+        gisticScoresFile = here(gistic_dir, group1, "scores.gistic"),
+        verbose = FALSE
+    )
+
+    g2_obj <- readGistic(
+        gisticAllLesionsFile = here(gistic_dir, group2, "all_lesions.conf_99.txt"),
+        gisticAmpGenesFile = here(gistic_dir, group2, "amp_genes.conf_99.txt"),
+        gisticDelGenesFile = here(gistic_dir, group2, "del_genes.conf_99.txt"),
+        gisticScoresFile = here(gistic_dir, group2, "scores.gistic"),
+        verbose = FALSE
+    )
+
+    ## Get sample counts for proper frequency calculation
+    g1_total_samples <- length(getSampleSummary(g1_obj)$Tumor_Sample_Barcode)
+    g2_total_samples <- length(getSampleSummary(g2_obj)$Tumor_Sample_Barcode)
+
+    message(paste("Group 1 samples:", g1_total_samples))
+    message(paste("Group 2 samples:", g2_total_samples))
+
+    # "----------------------------------------------------------------"
+    # Cytoband-level comparison
+    # "----------------------------------------------------------------"
+    ## Extract cytoband-level data
+    g1_cytoband <- getCytobandSummary(g1_obj)
+    g2_cytoband <- getCytobandSummary(g2_obj)
+
+    ## Separate amplifications and deletions
+    g1_cytoband_amp <- g1_cytoband |> filter(Variant_Classification == "Amp")
+    g1_cytoband_del <- g1_cytoband |> filter(Variant_Classification == "Del")
+    
+    g2_cytoband_amp <- g2_cytoband |> filter(Variant_Classification == "Amp")
+    g2_cytoband_del <- g2_cytoband |> filter(Variant_Classification == "Del")
+
+    ## Cytoband comparison
+    cytoband_comparison_amp <- Gistic2CompareCytoband(
+        cytoband1 = g1_cytoband_amp,
+        cytoband2 = g2_cytoband_amp,
+        alteration_type = "Amp"
+    )
+    
+    cytoband_comparison_del <- Gistic2CompareCytoband(
+        cytoband1 = g1_cytoband_del,
+        cytoband2 = g2_cytoband_del,
+        alteration_type = "Del"
+    )
+    
+    cytoband_comparison_results <- rbind(
+        cytoband_comparison_amp, 
+        cytoband_comparison_del
+    )
+
+    ## Statistical testing (Fisher's exact test for each cytoband)
+    cytoband_stat_res <- Gistic2CytobandStat(
+        cytoband_comparison_results, 
+        adj_method = "BH"
+    )
+
+    ## "----------------------------------------------------------------"
+    ## Gene level comparison
+    ## "----------------------------------------------------------------"
+    ## Get gene-level data
+    g1_gene <- getGeneSummary(g1_obj)
+    g2_gene <- getGeneSummary(g2_obj)
+
+    ## Separate amplifications and deletions
+    g1_gene_amp <- g1_gene |> filter(Amp !=0)
+    g1_gene_del <- g1_gene |> filter(Del !=0)
+
+    g2_gene_amp <- g2_gene |> filter(Amp !=0)
+    g2_gene_del <- g2_gene |> filter(Del !=0)
+    
+    ## Compare gene-level amplifications and deletions
+
+
+}
+
+Gistic2CompareCytoband <- function(
+    cytoband1, cytoband2, alteration_type
+) {
+    
+    ## Get all unique cytobands
+    all_cytobands <- unique(
+        c(cytoband1$Cytoband, cytoband2$Cytoband)
+    )
+
+    comparison_results <- data.frame()
+
+    ## Loop through each cytoband
+    for (cytoband in all_cytobands) {
+        ## Get sample counts for this cytoband
+        count1 <- ifelse(
+            cytoband %in% cytoband1$Cytoband,
+            cytoband1$nSamples[cytoband1$Cytoband == cytoband],
+            0
+        )
+        count2 <- ifelse(
+            cytoband %in% cytoband2$Cytoband,
+            cytoband2$nSamples[cytoband2$Cytoband == cytoband],
+            0
+        )
+
+        ## Calculate actual frequencies
+        freq1 <- count1 / g1_total_samples
+        freq2 <- count2 / g2_total_samples
+        freq_diff <- freq2 - freq1
+
+        ## Get q-values
+        qval1 <- ifelse(
+            cytoband %in% cytoband1$Cytoband,
+            cytoband1$qvalues[cytoband1$Cytoband == cytoband], 1
+        )
+        qval2 <- ifelse(
+            cytoband %in% cytoband2$Cytoband,
+            cytoband2$qvalues[cytoband2$Cytoband == cytoband],
+            1
+        )
+
+        ## Get gene counts
+        genes1 <- ifelse(
+            cytoband %in% cytoband1$Cytoband,
+            cytoband1$nGenes[cytoband1$Cytoband == cytoband],
+            0
+        )
+        genes2 <- ifelse(
+            cytoband %in% cytoband2$Cytoband,
+            cytoband2$nGenes[cytoband2$Cytoband == cytoband],
+            0
+        )
+
+        ## Get wide peak limits
+        peak1 <- ifelse(
+            cytoband %in% cytoband1$Cytoband,
+            as.character(cytoband1$Wide_Peak_Limits[cytoband1$Cytoband == cytoband]),
+            ""
+        )
+        peak2 <- ifelse(
+            cytoband %in% cytoband2$Cytoband,
+            as.character(cytoband2$Wide_Peak_Limits[cytoband2$Cytoband == cytoband]),
+            ""
+        )
+
+        comparison_results <- rbind(
+            comparison_results,
+            data.frame(
+                cytoband = cytoband,
+                alteration_type = alteration_type,
+                group1_count = count1,
+                group2_count = count2,
+                group1_total = g1_total_samples,
+                group2_total = g2_total_samples,
+                group1_freq = round(freq1, 3),
+                group2_freq = round(freq2, 3),
+                freq_difference = round(freq_diff, 3),
+                fold_change = ifelse(freq1 > 0, round(freq2 / freq1, 2), Inf),
+                group1_qval = qval1,
+                group2_qval = qval2,
+                group1_genes = genes1,
+                group2_genes = genes2,
+                group1_peak = peak1,
+                group2_peak = peak2,
+                enriched = freq_diff > freq_thres,
+                significant_in_group1 = qval1 < qval_thres,
+                significant_in_group2 = qval2 < qval_thres,
+                specific_in_group2 = count1 == 0 & count2 > 0
+            )
+        )
+        
+    }
+    ## return
+    comparison_results
+}
+
+Gistic2CytobandStat <- function(
+    cytoband_comparison_results, 
+    adj_method = "BH"
+) {
+
+    cytoband_comparison_results$fisher_pvalue <- NA
+    cytoband_comparison_results$fisher_odds_ratio <- NA
+
+    ## Loop through each cytoband comparison result
+    for (i in 1:nrow(cytoband_comparison_results)) {
+        
+        row <- cytoband_comparison_results[i, ]
+        
+        ## Create contingency table
+        contingency_table <- matrix(
+            c(
+                row$group2_count, row$group2_total - row$group2_count,
+                row$group1_count, row$group1_total - row$group1_count
+            ),
+            nrow = 2, 
+            byrow = TRUE
+        )
+        
+        ## Perform Fisher's exact test
+        if (sum(contingency_table) > 0) {
+            fisher_result <- fisher.test(contingency_table)
+            cytoband_comparison_results$fisher_pvalue[i] <- fisher_result$p.value
+            cytoband_comparison_results$fisher_odds_ratio[i] <- fisher_result$estimate
+        }
+    }
+
+    ## Add FDR correction
+    cytoband_comparison_results$fisher_qvalue <- p.adjust(
+        cytoband_comparison_results$fisher_pvalue,
+        method = adj_method
+    )
+
+    cytoband_comparison_results
 }

@@ -26,7 +26,7 @@ plot_dir <- "figures/wes"
 capture_size <- 34 
 
 ## Clinical information
-clinical_info <- loadDFSPClinicalInfo()
+clinical_info <- LoadDFSPClinicalInfo()
 
 # clinical_info |> 
 #     select(
@@ -83,7 +83,7 @@ total_variants <- nrow(pcgr_data)
 message(paste("Total number of variants = ", total_variants))
 
 ## Save the collected PCGR data
-saveData(
+SaveData(
     pcgr_data, 
     dir = data_dir, 
     filename = "dfsp_wes_pcgr_cohort_merged_tbl"
@@ -92,7 +92,7 @@ saveData(
 ##"==========================================================================="
 ## Filter PCGR data --------------
 ##"==========================================================================="
-pcgr_data <- loadData(
+pcgr_data <- LoadData(
     dir = data_dir, 
     filename = "dfsp_wes_pcgr_cohort_merged_tbl"
 )
@@ -176,7 +176,7 @@ maf_obj <- read.maf(
 maf_obj@variant.classification.summary
 # oncoplot(maf = maf_obj, top = 20)
 
-saveData(
+SaveData(
     maf_obj, 
     dir = data_dir, 
     filename = "dfsp_wes_pcgr_cohort_maf_obj"
@@ -185,7 +185,7 @@ saveData(
 ## "========================================================================="
 ## Mutated genes and variants summary  ----
 ## "========================================================================="
-maf_obj <- loadData(
+maf_obj <- LoadData(
     dir = data_dir, 
     filename = "dfsp_wes_pcgr_cohort_maf_obj"
 )
@@ -361,7 +361,7 @@ for (group_column in group_columns) {
         is_paired = FALSE
     )
 
-    savePlot(
+    SavePlot(
         plot = tmb_res$plot,
         width = 3.5,
         height = 3,
@@ -387,7 +387,7 @@ for (group_column in group_columns) {
         is_paired = FALSE
     )
 
-    savePlot(
+    SavePlot(
         plot = tmb_res$plot,
         width = 3.5,
         height = 3,
@@ -440,13 +440,13 @@ dev.off()
 ## "========================================================================="
 ## Mutated genes among FST groups ----
 ## "========================================================================="
-maf_obj <- loadData(
+maf_obj <- LoadData(
     dir = data_dir, 
     filename = "dfsp_wes_pcgr_cohort_maf_obj"
 )
 
 ## Load the sample groups to compare
-sample_groups <- loadDFSPSampleGroups()
+sample_groups <- LoadDFSPSampleGroups()
 message(
     "Sample groups to compare:\n", 
     paste("-", names(sample_groups), collapse = "\n")
@@ -535,7 +535,7 @@ plot <- plot_data |>
     theme_minimal()+
     plot_theme()
 
-savePlot(
+SavePlot(
     plot = plot,
     width = 6,
     height = 4,
@@ -869,7 +869,7 @@ plot <- cbioportal_sarcoma_freq |>
     )
 
 filename <- "dfsp_wes_pcgr_cohort_mutation_frequency_comparison_cbioportal"
-savePlot(
+SavePlot(
     plot = plot,
     width = 8,
     height = 4,
@@ -914,7 +914,7 @@ plot <- peng_2022_freq |>
     )
 
 filename <- "dfsp_wes_pcgr_cohort_mutation_frequency_comparison_peng_2022"
-savePlot(
+SavePlot(
     plot = plot,
     width = 5,
     height = 4,
@@ -984,7 +984,7 @@ maf_obj@gene.summary
 maf_obj@summary
 maf_obj@variant.type.summary
 
-maf_obj <- loadData(
+maf_obj <- LoadData(
     dir = data_dir,
     filename = "dfsp_wes_pcgr_cohort_maf_obj"
 )
