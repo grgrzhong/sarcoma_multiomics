@@ -148,100 +148,134 @@ for (group in groups) {
 }
 
 ## "==========================================================================="
-## Comparative Analysis for FST Transformation ----
+## Find enriched cytobands and genes ----
 ## "==========================================================================="
-## Run comparative analysis if both groups exist
-if ("U-DFSP" %in% groups && "FS-DFSP" %in% groups) {
-    message("Running FST transformation comparative analysis...")
+gistic_dir <- here("data/wes/GISTIC2/cnv_facets")
 
-    ## Load GISTIC objects
-    untransformed_gistic <- readGistic(
-        gisticAllLesionsFile = here(gistic_dir, "U-DFSP", "all_lesions.conf_99.txt"),
-        gisticAmpGenesFile = here(gistic_dir, "U-DFSP", "amp_genes.conf_99.txt"),
-        gisticDelGenesFile = here(gistic_dir, "U-DFSP", "del_genes.conf_99.txt"),
-        gisticScoresFile = here(gistic_dir, "U-DFSP", "scores.gistic"),
-        verbose = FALSE
+comparisons <- list(
+    `Non-Meta_vs_Meta` = c("Non-Meta", "Meta"),
+    `U-DFSP_vs_Pre-FST` = c("U-DFSP", "Pre-FST"),
+    `U-DFSP_vs_Post-FST` = c("U-DFSP", "Post-FST"),
+    `U-DFSP_vs_FS-DFSP` = c("U-DFSP", "FS-DFSP"),
+    `Pre-FST_vs_Post-FST` = c("Pre-FST", "Post-FST"),
+    `Pre-FST_vs_FS-DFSP` = c("Pre-FST", "FS-DFSP"),
+    `Post-FST_vs_FS-DFSP` = c("Post-FST", "FS-DFSP")
+)
+
+stat_list <- list()
+
+for (comparison in names(comparisons)) {
+
+    group1 <- comparisons[[comparison]][1]
+    group2 <- comparisons[[comparison]][2]
+
+    message(paste0("Comparing: ", group1, " vs ", group2))
+
+    stat_list[[comparison]] <- GetStatResGistic2(
+        gistic_dir = gistic_dir,
+        group1 = group1,
+        group2 = group2,
+        freq_thres = 0.2,
+        qval_thres = 0.25
     )
+}
 
-    transformed_gistic <- readGistic(
-        gisticAllLesionsFile = here(gistic_dir, "FS-DFSP", "all_lesions.conf_99.txt"),
-        gisticAmpGenesFile = here(gistic_dir, "FS-DFSP", "amp_genes.conf_99.txt"),
-        gisticDelGenesFile = here(gistic_dir, "FS-DFSP", "del_genes.conf_99.txt"),
-        gisticScoresFile = here(gistic_dir, "FS-DFSP", "scores.gistic"),
-        verbose = FALSE
-    )
+for (name in names(stat_list)) {
 
-    ## Perform comparative analysis
-    transformation_cnas <- compare_gistic_groups(
-        untransformed_gistic, transformed_gistic, "FST_transformation"
-    )
+    output <- stat_list[[name]]
 
-    transformation_genes <- compare_gistic_genes(
-        untransformed_gistic, transformed_gistic
-    )
-
-    ## Create comparison plots
-    dir.create(here("figures/wes/gistic2/comparative"), recursive = TRUE, showWarnings = FALSE)
-
-    ## Plot CNA frequency comparison
-    for (img in c("png", "pdf")) {
-        file <- here(
-            "figures/wes/gistic2/comparative",
-            paste0("fst_transformation_cna_comparison.", img)
+    write_xlsx(
+        output,
+        path = here(
+            "results/wes", paste0("wes_cnvfacets_gistic2_", name, ".xlsx")
         )
-
-        if (img == "png") {
-            CairoPNG(file = file, width = 10, height = 6, res = 300, units = "in")
-        } else {
-            CairoPDF(file = file, width = 10, height = 6)
-        }
-
-        plot_cna_comparison(transformation_cnas)
-        dev.off()
-    }
-
-    ## Save gene-level results
-    saveRDS(transformation_genes, here("results", "FST_transformation_genes.rds"))
-
-    ## Print summary
-    message("FST Transformation Analysis Complete:")
-    message(paste(
-        "- Total significant CNAs:",
-        sum(transformation_cnas$transformation_enriched &
-            transformation_cnas$significant_in_transformed)
-    ))
-    message(paste(
-        "- Transformation-specific amplified genes:",
-        length(transformation_genes$amp_specific)
-    ))
-    message(paste(
-        "- Transformation-specific deleted genes:",
-        length(transformation_genes$del_specific)
-    ))
+    )
 }
 
-## Function to plot CNA comparison
-plot_cna_comparison <- function(cna_data) {
-    significant_cnas <- cna_data %>%
-        filter(transformation_enriched == TRUE, significant_in_transformed == TRUE) %>%
-        arrange(desc(frequency_difference))
+test <- stat_list$`Non-Meta_vs_Meta`[["cytoband"]] |> 
+    as_tibble()
 
-    if (nrow(significant_cnas) > 0) {
-        p <- ggplot(significant_cnas, aes(
-            x = reorder(cytoband, frequency_difference),
-            y = frequency_difference
-        )) +
-            geom_col(aes(fill = alteration_type)) +
-            coord_flip() +
-            scale_fill_manual(values = c("Amplification" = "#D95F02", "Deletion" = "#1B9E77")) +
-            labs(
-                title = "FST Transformation-Enriched CNAs",
-                x = "Cytogenetic Band",
-                y = "Frequency Difference (Transformed - Untransformed)",
-                fill = "Alteration Type"
-            ) +
-            theme_minimal()
+test |> 
+    filter(fisher_qvalue < 0.05) |> 
+    filter(enriched_in_group2 | depleted_in_group2) |> 
+    view()
 
-        print(p)
-    }
-}
+stat_res <- GetStatResGistic2(
+    gistic_dir = gistic_dir,
+    group1 = group1,
+    group2 = group2,
+    freq_thres = 0.2,
+    qval_thres = 0.25
+)
+
+# PlotGistic2Chrom <- 
+
+# scores <- "/mnt/f/projects/sarcoma_multiomics/data/wes/GISTIC2/cnv_facets/FS-DFSP/scores.gistic"
+
+# library(BSgenome.Hsapiens.UCSC.hg38)
+# chrom_info <- tibble(
+#     chromName = seqnames(BSgenome.Hsapiens.UCSC.hg38),
+#     chromlength = seqlengths(BSgenome.Hsapiens.UCSC.hg38)
+# )
+# chrom_info$chromNum <- 1:length(chrom_info$chromName)
+# chrom_info <- chrom_info[1:22, ]
+
+# ## Calculate cumulative chromosome lengths
+# chrom_info$chromlengthCumsum <- cumsum(as.numeric(chrom_info$chromlength))
+
+# ## Calculate chromosome start positions from 0
+# chrom_info$chromStartPosFrom0 <- c(0, chrom_info$chromlengthCumsum[-nrow(chrom_info)])
+
+# ## Calculate chromosome middle positions from 0
+# tmp_middle <- diff(c(0, chrom_info$chromlengthCumsum)) / 2
+# chrom_info$chromMiddlePosFrom0 <- chrom_info$chromStartPosFrom0 + tmp_middle
+
+# scores <- read.table(
+#     file = scores, 
+#     header = TRUE, 
+#     sep = "\t", 
+#     stringsAsFactors = FALSE
+# )
+# ## Add chromosome ID and start/end positions
+# chromID <- scores$Chromosome
+# scores$StartPos <- scores$Start + chrom_info$chromStartPosFrom0[chromID]
+# scores$EndPos <- scores$End + chrom_info$chromStartPosFrom0[chromID]
+
+# range(scores$G.score)
+# ## Adjust G-scores for deletions for visualization
+# # scores[scores$Type == "Del", "G.score"] <- scores[scores$Type == "Del", "G.score"] * -1
+# scores <- scores |> 
+#     mutate(
+#         G.score = case_when(
+#             Type == "Del" ~ G.score * -1,
+#             Type == "Amp" ~ G.score
+#         )
+#     )
+
+# library(ggplot2)
+# library(ggsci)
+
+# ggplot(scores, aes(StartPos, G.score)) +
+#     geom_area(aes(group = Type, fill = factor(Type, levels = c("Del", "Amp")))) +
+#     scale_fill_lancet(guide = guide_legend(reverse = T)) +
+#     geom_vline(data = chrom_info, mapping = aes(xintercept = chromlengthCumsum), linetype = 2) +
+#     geom_text(data = chrom_info, aes(x = chromMiddlePosFrom0, y = 0.2, label = chromName)) +
+#     scale_x_continuous(expand = c(0, -1000), limits = c(0, 2.9e9)) +
+#     ylim(-0.3, 0.3) +
+#     theme_minimal()
+
+# chrom_info$ypos <- rep(c(0.2, 0.25), 11)
+
+# ggplot(scores, aes(StartPos, G.score)) +
+#     geom_area(aes(group = Type, fill = factor(Type, levels = c("Del", "Amp")))) +
+#     scale_fill_lancet(guide = guide_legend(reverse = T), name = "Type") +
+#     geom_vline(data = chrom_info, mapping = aes(xintercept = chromlengthCumsum), linetype = 2) +
+#     geom_text(data = chrom_info, aes(x = chromMiddlePosFrom0, y = ypos, label = chromName)) +
+#     scale_x_continuous(expand = c(0, -1000), limits = c(0, 2.9e9), name = NULL, labels = NULL) +
+#     ylim(-0.3, 0.3) +
+#     theme_minimal() +
+#     theme(
+#         legend.position = "top",
+#         axis.text.y = element_text(color = "black", size = 14),
+#         axis.title.y = element_text(color = "black", size = 16)
+#     )

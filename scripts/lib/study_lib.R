@@ -2935,16 +2935,19 @@ GetStatResGistic2 <- function(
         verbose = FALSE
     )
 
+    # head(g1_obj@data)
+    # head(g1_obj@gis.scores)
+
     ## Get sample counts for proper frequency calculation
     g1_total_samples <- length(getSampleSummary(g1_obj)$Tumor_Sample_Barcode)
     g2_total_samples <- length(getSampleSummary(g2_obj)$Tumor_Sample_Barcode)
 
-    message(paste("Group 1 samples:", g1_total_samples))
-    message(paste("Group 2 samples:", g2_total_samples))
+    message(paste("Group 1 (", group1, ") samples:", g1_total_samples))
+    message(paste("Group 2 (", group2, ") samples:", g2_total_samples))
 
-    # "----------------------------------------------------------------"
-    # Cytoband-level comparison
-    # "----------------------------------------------------------------"
+    ## "==================================================================="
+    ## Cytoband-level comparison ----
+    ## "==================================================================="
     ## Extract cytoband-level data
     g1_cytoband <- getCytobandSummary(g1_obj)
     g2_cytoband <- getCytobandSummary(g2_obj)
@@ -2960,19 +2963,28 @@ GetStatResGistic2 <- function(
     cytoband_comparison_amp <- Gistic2CompareCytoband(
         cytoband1 = g1_cytoband_amp,
         cytoband2 = g2_cytoband_amp,
-        alteration_type = "Amp"
+        alteration_type = "Amp",
+        g1_total_samples = g1_total_samples,
+        g2_total_samples = g2_total_samples,
+        freq_thres = freq_thres,
+        qval_thres = qval_thres
     )
     
     cytoband_comparison_del <- Gistic2CompareCytoband(
         cytoband1 = g1_cytoband_del,
         cytoband2 = g2_cytoband_del,
-        alteration_type = "Del"
+        alteration_type = "Del",
+        g1_total_samples = g1_total_samples,
+        g2_total_samples = g2_total_samples,
+        freq_thres = freq_thres,
+        qval_thres = qval_thres
     )
     
     cytoband_comparison_results <- rbind(
         cytoband_comparison_amp, 
         cytoband_comparison_del
-    )
+    ) |> 
+        as_tibble()
 
     ## Statistical testing (Fisher's exact test for each cytoband)
     cytoband_stat_res <- Gistic2CytobandStat(
@@ -2980,9 +2992,9 @@ GetStatResGistic2 <- function(
         adj_method = "BH"
     )
 
-    ## "----------------------------------------------------------------"
-    ## Gene level comparison
-    ## "----------------------------------------------------------------"
+    ## "==================================================================="
+    ## Gene level comparison ----
+    ## "==================================================================="
     ## Get gene-level data
     g1_gene <- getGeneSummary(g1_obj)
     g2_gene <- getGeneSummary(g2_obj)
@@ -2995,12 +3007,67 @@ GetStatResGistic2 <- function(
     g2_gene_del <- g2_gene |> filter(Del !=0)
     
     ## Compare gene-level amplifications and deletions
+    gene_comparison_amp <- Gistic2CompareGenes(
+        gene1 = g1_gene_amp,
+        gene2 = g2_gene_amp,
+        alteration_type = "Amp",
+        g1_total_samples = g1_total_samples,
+        g2_total_samples = g2_total_samples,
+        freq_thres = freq_thres
+    )
+    
+    gene_comparison_del <- Gistic2CompareGenes(
+        gene1 = g1_gene_del,
+        gene2 = g2_gene_del,
+        alteration_type = "Del",
+        g1_total_samples = g1_total_samples,
+        g2_total_samples = g2_total_samples,
+        freq_thres = freq_thres
+    )
+    
+    gene_comparison_results <- rbind(
+        gene_comparison_amp, 
+        gene_comparison_del
+    ) |> 
+        as_tibble()
+    
+    ## Statistical testing for gene-level results
+    gene_stat_res <- Gistic2GeneStat(
+        gene_comparison_results, 
+        adj_method = "BH"
+    )
+    
+    cytoband_sig <- cytoband_stat_res |> 
+        dplyr::filter(significantly_different)
+    
+    cytoband_sig_g2 <- cytoband_sig |> 
+        filter(enriched_in_group2)
+    
+    # cytoband_sig_g2_bands <- cytoband_sig_g2$cytoband
+    
+    # g2_obj@data |> 
+    #     as_tibble() |> 
+    #     mutate(bands = str_extract(Cytoband, "(?<=:).+")) |>
+    #     filter(bands %in% cytoband_sig_g2_bands) |>
 
+    # gene_sig <- gene_stat_res |> 
+    #     dplyr::filter(significantly_different)
+
+    ## Return comprehensive results
+    return(
+        list(
+            cytoband = cytoband_stat_res,
+            cytoband_sig = cytoband_sig,
+            gene = gene_stat_res,
+            gene_sig = gene_sig
+        )
+    )
 
 }
 
 Gistic2CompareCytoband <- function(
-    cytoband1, cytoband2, alteration_type
+    cytoband1, cytoband2, alteration_type,
+    g1_total_samples, g2_total_samples, freq_thres, qval_thres
 ) {
     
     ## Get all unique cytobands
@@ -3012,57 +3079,74 @@ Gistic2CompareCytoband <- function(
 
     ## Loop through each cytoband
     for (cytoband in all_cytobands) {
-        ## Get sample counts for this cytoband
-        count1 <- ifelse(
-            cytoband %in% cytoband1$Cytoband,
-            cytoband1$nSamples[cytoband1$Cytoband == cytoband],
-            0
-        )
-        count2 <- ifelse(
-            cytoband %in% cytoband2$Cytoband,
-            cytoband2$nSamples[cytoband2$Cytoband == cytoband],
-            0
-        )
+        ## Get sample counts for this cytoband - using safer indexing
+        count1 <- 0
+        count2 <- 0
+        
+        ## Safely extract counts for group1
+        if (cytoband %in% cytoband1$Cytoband) {
+            idx1 <- which(cytoband1$Cytoband == cytoband)[1]  # Take first match
+            count1 <- cytoband1$nSamples[idx1]
+        }
+        
+        ## Safely extract counts for group2
+        if (cytoband %in% cytoband2$Cytoband) {
+            idx2 <- which(cytoband2$Cytoband == cytoband)[1]  # Take first match
+            count2 <- cytoband2$nSamples[idx2]
+        }
 
         ## Calculate actual frequencies
         freq1 <- count1 / g1_total_samples
         freq2 <- count2 / g2_total_samples
         freq_diff <- freq2 - freq1
 
-        ## Get q-values
-        qval1 <- ifelse(
-            cytoband %in% cytoband1$Cytoband,
-            cytoband1$qvalues[cytoband1$Cytoband == cytoband], 1
-        )
-        qval2 <- ifelse(
-            cytoband %in% cytoband2$Cytoband,
-            cytoband2$qvalues[cytoband2$Cytoband == cytoband],
-            1
-        )
+        ## Get q-values - using safer indexing
+        qval1 <- 1
+        qval2 <- 1
+        
+        ## Safely extract q-values for group1
+        if (cytoband %in% cytoband1$Cytoband) {
+            idx1 <- which(cytoband1$Cytoband == cytoband)[1]  # Take first match
+            qval1 <- cytoband1$qvalues[idx1]
+        }
+        
+        ## Safely extract q-values for group2
+        if (cytoband %in% cytoband2$Cytoband) {
+            idx2 <- which(cytoband2$Cytoband == cytoband)[1]  # Take first match
+            qval2 <- cytoband2$qvalues[idx2]
+        }
 
-        ## Get gene counts
-        genes1 <- ifelse(
-            cytoband %in% cytoband1$Cytoband,
-            cytoband1$nGenes[cytoband1$Cytoband == cytoband],
-            0
-        )
-        genes2 <- ifelse(
-            cytoband %in% cytoband2$Cytoband,
-            cytoband2$nGenes[cytoband2$Cytoband == cytoband],
-            0
-        )
+        ## Get gene counts - using safer indexing
+        genes1 <- 0
+        genes2 <- 0
+        
+        ## Safely extract gene counts for group1
+        if (cytoband %in% cytoband1$Cytoband) {
+            idx1 <- which(cytoband1$Cytoband == cytoband)[1]  # Take first match
+            genes1 <- cytoband1$nGenes[idx1]
+        }
+        
+        ## Safely extract gene counts for group2
+        if (cytoband %in% cytoband2$Cytoband) {
+            idx2 <- which(cytoband2$Cytoband == cytoband)[1]  # Take first match
+            genes2 <- cytoband2$nGenes[idx2]
+        }
 
-        ## Get wide peak limits
-        peak1 <- ifelse(
-            cytoband %in% cytoband1$Cytoband,
-            as.character(cytoband1$Wide_Peak_Limits[cytoband1$Cytoband == cytoband]),
-            ""
-        )
-        peak2 <- ifelse(
-            cytoband %in% cytoband2$Cytoband,
-            as.character(cytoband2$Wide_Peak_Limits[cytoband2$Cytoband == cytoband]),
-            ""
-        )
+        ## Get wide peak limits - using safer indexing
+        peak1 <- ""
+        peak2 <- ""
+        
+        ## Safely extract peak limits for group1
+        if (cytoband %in% cytoband1$Cytoband) {
+            idx1 <- which(cytoband1$Cytoband == cytoband)[1]  # Take first match
+            peak1 <- as.character(cytoband1$Wide_Peak_Limits[idx1])
+        }
+        
+        ## Safely extract peak limits for group2
+        if (cytoband %in% cytoband2$Cytoband) {
+            idx2 <- which(cytoband2$Cytoband == cytoband)[1]  # Take first match
+            peak2 <- as.character(cytoband2$Wide_Peak_Limits[idx2])
+        }
 
         comparison_results <- rbind(
             comparison_results,
@@ -3086,13 +3170,165 @@ Gistic2CompareCytoband <- function(
                 enriched = freq_diff > freq_thres,
                 significant_in_group1 = qval1 < qval_thres,
                 significant_in_group2 = qval2 < qval_thres,
-                specific_in_group2 = count1 == 0 & count2 > 0
+                specific_in_group2 = count1 == 0 & count2 > 0,
+                stringsAsFactors = FALSE
             )
-        )
-        
+        )        
     }
     ## return
     comparison_results
+}
+
+Gistic2CompareGenes <- function(
+    gene1, gene2, alteration_type,
+    g1_total_samples, g2_total_samples, freq_thres) {
+    ## Get all unique genes
+    all_genes <- unique(
+        c(gene1$Hugo_Symbol, gene2$Hugo_Symbol)
+    )
+
+    comparison_results <- data.frame()
+
+    ## Loop through each gene
+    for (gene in all_genes) {
+        
+        ## Get sample counts for this gene - using AlteredSamples column
+        count1 <- 0
+        count2 <- 0
+        
+        ## Safely extract counts for group1
+        if (gene %in% gene1$Hugo_Symbol) {
+            idx1 <- which(gene1$Hugo_Symbol == gene)[1]  # Take first match
+            count1 <- gene1$AlteredSamples[idx1]  # Use AlteredSamples instead of Amp/Del
+        }
+        
+        ## Safely extract counts for group2
+        if (gene %in% gene2$Hugo_Symbol) {
+            idx2 <- which(gene2$Hugo_Symbol == gene)[1]  # Take first match
+            count2 <- gene2$AlteredSamples[idx2]  # Use AlteredSamples instead of Amp/Del
+        }
+    
+
+        ## Calculate actual frequencies
+        freq1 <- count1 / g1_total_samples
+        freq2 <- count2 / g2_total_samples
+        freq_diff <- freq2 - freq1
+
+        comparison_results <- rbind(
+            comparison_results,
+            data.frame(
+                gene = gene,
+                alteration_type = alteration_type,
+                group1_count = count1,
+                group2_count = count2,
+                group1_total = g1_total_samples,
+                group2_total = g2_total_samples,
+                group1_freq = round(freq1, 3),
+                group2_freq = round(freq2, 3),
+                freq_difference = round(freq_diff, 3),
+                fold_change = ifelse(freq1 > 0, round(freq2 / freq1, 2), Inf),
+                enriched = freq_diff > freq_thres,
+                specific_in_group2 = count1 == 0 & count2 > 0,
+                stringsAsFactors = FALSE
+            )
+        )
+    }
+    ## return
+    comparison_results
+}
+
+Gistic2GeneStat <- function(
+    gene_comparison_results, 
+    adj_method = "BH"
+) {
+
+    gene_comparison_results$fisher_pvalue <- NA
+    gene_comparison_results$fisher_odds_ratio <- NA
+
+    ## Loop through each gene comparison result
+    for (i in 1:nrow(gene_comparison_results)) {
+        
+        row <- gene_comparison_results[i, ]
+        
+        ## Check for problematic values in the row
+        if (!is.finite(row$group1_count) || row$group1_count < 0) {
+            message("Warning: Gene ", row$gene, " has problematic group1_count: ", row$group1_count)
+        }
+        if (!is.finite(row$group2_count) || row$group2_count < 0) {
+            message("Warning: Gene ", row$gene, " has problematic group2_count: ", row$group2_count)
+        }
+        if (!is.finite(row$group1_total) || row$group1_total < 1) {
+            message("Warning: Gene ", row$gene, " has problematic group1_total: ", row$group1_total)
+        }
+        if (!is.finite(row$group2_total) || row$group2_total < 1) {
+            message("Warning: Gene ", row$gene, " has problematic group2_total: ", row$group2_total)
+        }
+        
+        ## Ensure all values are valid non-negative integers
+        group1_count <- max(0, as.integer(row$group1_count))
+        group2_count <- max(0, as.integer(row$group2_count))
+        group1_total <- max(1, as.integer(row$group1_total))
+        group2_total <- max(1, as.integer(row$group2_total))
+        
+        ## Create contingency table
+        contingency_table <- matrix(
+            c(
+                group2_count, group2_total - group2_count,
+                group1_count, group1_total - group1_count
+            ),
+            nrow = 2, 
+            byrow = TRUE,
+            dimnames = list(
+                c("Group2", "Group1"),
+                c("Altered", "Not_Altered")
+            )
+        )
+        
+        ## Check contingency table for negative values
+        if (any(contingency_table < 0)) {
+            message("Warning: Gene ", row$gene, " has negative values in contingency table:")
+            print(contingency_table)
+            ## Fix negative values
+            contingency_table <- pmax(contingency_table, 0)
+        }
+        
+        ## Perform Fisher's exact test only if contingency table is valid
+        if (sum(contingency_table) > 0 && all(is.finite(contingency_table))) {
+            tryCatch({
+                fisher_result <- fisher.test(contingency_table)
+                gene_comparison_results$fisher_pvalue[i] <- fisher_result$p.value
+                gene_comparison_results$fisher_odds_ratio[i] <- fisher_result$estimate
+            }, error = function(e) {
+                message("Error in Fisher's test for gene ", row$gene, ": ", e$message)
+                message("Contingency table:")
+                print(contingency_table)
+                gene_comparison_results$fisher_pvalue[i] <<- NA
+                gene_comparison_results$fisher_odds_ratio[i] <<- NA
+            })
+        }
+    }
+
+    ## Add FDR correction
+    gene_comparison_results$fisher_qvalue <- p.adjust(
+        gene_comparison_results$fisher_pvalue,
+        method = adj_method
+    )
+    
+    ## Add interpretation columns for clarity
+    gene_comparison_results <- gene_comparison_results %>%
+        mutate(
+            significantly_different = fisher_qvalue < 0.05,
+            enriched_in_group2 = fisher_qvalue < 0.05 & fisher_odds_ratio > 1 & freq_difference > 0,
+            depleted_in_group2 = fisher_qvalue < 0.05 & fisher_odds_ratio < 1 & freq_difference < 0,
+            effect_direction = case_when(
+                !significantly_different ~ "No significant difference",
+                enriched_in_group2 ~ "Enriched in Group2",
+                depleted_in_group2 ~ "Depleted in Group2 (Enriched in Group1)",
+                TRUE ~ "Unclear"
+            )
+        )
+
+    gene_comparison_results
 }
 
 Gistic2CytobandStat <- function(
@@ -3108,14 +3344,18 @@ Gistic2CytobandStat <- function(
         
         row <- cytoband_comparison_results[i, ]
         
-        ## Create contingency table
+        ## Create contingency table with group2 in first row for easier interpretation
         contingency_table <- matrix(
             c(
                 row$group2_count, row$group2_total - row$group2_count,
                 row$group1_count, row$group1_total - row$group1_count
             ),
             nrow = 2, 
-            byrow = TRUE
+            byrow = TRUE,
+            dimnames = list(
+                c("Group2", "Group1"),
+                c("Altered", "Not_Altered")
+            )
         )
         
         ## Perform Fisher's exact test
@@ -3131,6 +3371,20 @@ Gistic2CytobandStat <- function(
         cytoband_comparison_results$fisher_pvalue,
         method = adj_method
     )
+    
+    ## Add interpretation columns for clarity
+    cytoband_comparison_results <- cytoband_comparison_results %>%
+        mutate(
+            significantly_different = fisher_qvalue < 0.05,
+            enriched_in_group2 = fisher_qvalue < 0.05 & fisher_odds_ratio > 1 & freq_difference > 0,
+            depleted_in_group2 = fisher_qvalue < 0.05 & fisher_odds_ratio < 1 & freq_difference < 0,
+            effect_direction = case_when(
+                !significantly_different ~ "No significant difference",
+                enriched_in_group2 ~ "Enriched in Group2",
+                depleted_in_group2 ~ "Depleted in Group2 (Enriched in Group1)",
+                TRUE ~ "Unclear"
+            )
+        )
 
     cytoband_comparison_results
 }
