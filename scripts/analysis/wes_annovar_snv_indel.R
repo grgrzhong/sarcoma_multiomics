@@ -4,55 +4,24 @@ library(maftools)
 source(here::here("scripts/lib/study_lib.R"))
 
 ## Merge all the annovar annoated variants -------------
-out_data_dir <- "data/collect"
-out_plot_dir <- "figures/wes"
+data_dir <- "data/wes/Processed"
+figure_dir <- "figures/wes"
 
 ## "=========================================================================="
 ## Collect the annovar annotated variants
 ## "=========================================================================="
-annovar_dir <- "data/wes/mutect2"
-annovar_tbl <- collectAnnovarData(dir = annovar_dir)
-SaveData(
-    annovar_tbl, 
-    dir = out_data_dir, 
-    filename = "dfsp_wes_annovar_cohort_merged_tbl"
-)
+annovar_dir <- "data/wes/Mutect2"
+annovar_tbl <- CollectAnnovarData(dir = annovar_dir)
+filename <- "wes_annovar_DFSP_cohort_merged_tbl"
+SaveData(annovar_tbl, dir = data_dir, filename = filename)
 
-## "=========================================================================="
-## Filter variants ----
-## "=========================================================================="
-annovar_tbl <- LoadData(
-    dir = out_data_dir, 
-    filename = "dfsp_wes_annovar_cohort_merged_tbl"
-)
+## Filter variants
+annovar_tbl <- LoadData(dir = data_dir, filename = filename)
 
-filtered_variants <- filterAnnovarData(data = annovar_tbl)
+filtered_variants <- FilterAnnovarData(data = annovar_tbl)
 
-SaveData(
-    filtered_variants, 
-    here(out_dir, "dfsp_wes_annovar_cohort_merged_tbl_included")
-)
-
-## Print out the summary of the filtered variants
-message(
-    "Summary of the filtered variants:\n",
-    "Total variants: ", nrow(annovar_tbl), "\n",
-    "Indels/Splice site mutations: ", nrow(first_inclusion_indels) + nrow(first_inclusion_splice), "\n",
-    "SNVs with at least 3 deleterious functional impact or pathogenic predictions: ", nrow(second_inclusion_snv1), "\n",
-    "SNVs in CLNSIG: ", nrow(second_inclusion_snv_clnsig), "\n",
-    "SNVs in COSMIC: ", nrow(second_inclusion_snv_cosmic), "\n",
-    "SNVs in cancer hotspots: ", nrow(second_inclusion_snv_hotspot), "\n",
-    "SNVs in OncoKB: ", nrow(second_inclusion_snv_oncokb), "\n",
-    "Total included variants: ", nrow(all_included_variants), "\n",
-    "Total filtered variants: ", nrow(annovar_tbl) - nrow(all_included_variants), "\n"
-)
-
-
-##############################################################################
-## Explore the variants ----------------
-##############################################################################
-## Find the enriched variants in FST
-maf_obj <- read.maf(maf = maf_filter)
+## Find the enriched variants in FST ----
+maf_obj <- read.maf(maf = filtered_variants)
 
 ## Sample groups
 sample_groups <- list(
@@ -71,7 +40,7 @@ sample_groups <- list(
     `FS_DFSP` = c("Unpaired FST")
 )
 
-sample_info <- loadSampleInfo() |> 
+sample_info <- LoadSampleInfo() |> 
     filter(Specimen.Class == "Tumour") |> 
     select(
         Sample.ID, Diagnosis, Specimen.Class, Specimen.Nature, Histology.Nature,
@@ -126,19 +95,3 @@ oncoplot(
     showTumorSampleBarcodes = FALSE,
     removeNonMutated = FALSE
 )
-
-# mafOncoPlot(
-#     maf = maf_obj,
-#     top_n_genes = top_n_genes,
-#     clinicalFeatures = clinical_features,
-#     annotationColor = annotation_colors,
-#     sortByAnnotation = TRUE,
-#     showTumorSampleBarcodes = FALSE,
-#     removeNonMutated = FALSE,
-#     titleText = paste0(" n = ", n_samples, ", top ", top_n_genes, " genes"),
-#     fontSize = 0.7,
-#     width = 10,
-#     height = 8,
-#     fig_dir = "figures/oncoplot",
-#     fig_name = "oncoplot_sample_groups"
-# )

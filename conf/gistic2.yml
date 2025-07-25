@@ -25,4 +25,3 @@ dependencies:
   - xorg-libxmu=1.2.1=hb9d3cd8_1
   - xorg-libxt=1.3.1=hb9d3cd8_0
   - zlib=1.2.13=h4ab18f5_6
-prefix: /home/zhonggr/miniforge3/envs/gistic2

@@ -427,7 +427,7 @@ mafOncoPlot <- function(
     print(p)
 }
 
-loadSampleInfo <- function() {
+LoadSampleInfo <- function() {
     read_xlsx(
         here(
             "data/clinical/DFSP_multiomics_sample_list_updated_20250509.xlsx"
@@ -774,7 +774,7 @@ loadCancerHotspot <- function(
 }
 
 
-collectAnnovarData <- function(
+CollectAnnovarData <- function(
     dir,
     is_save = FALSE,
     save_dir = "data/wes/annotation/merged"
@@ -1020,7 +1020,7 @@ collectAnnovarData <- function(
 
 }
 
-filterAnnovarData <- function(data) {
+FilterAnnovarData <- function(data) {
 
     annovar_tbl <- data
     ## VAF >= 5% and VAD >= 4 and DP >=20 in the tumor samples
@@ -1176,7 +1176,10 @@ filterAnnovarData <- function(data) {
     ## OncoKB
     oncokb_gene_list <- "data/public/cancerGeneList.tsv"
 
-    oncokb_gene_list <- read_tsv(here(oncokb_gene_list)) |>
+    oncokb_gene_list <- read_tsv(
+        here(oncokb_gene_list),
+        show_col_types = FALSE
+    ) |>
         pull(`Hugo Symbol`)
 
     second_inclusion_snv_oncokb <- first_inclusion_snv |>
@@ -1435,7 +1438,7 @@ loadDFSPGroupInfo <- function() {
         `FS_DFSP` = c("Unpaired FST")
     )
 
-    sample_info <- loadSampleInfo() |>
+    sample_info <- LoadSampleInfo() |>
         filter(Specimen.Class == "Tumour") |>
         select(
             Sample.ID, Diagnosis, Specimen.Class, Specimen.Nature, Histology.Nature,

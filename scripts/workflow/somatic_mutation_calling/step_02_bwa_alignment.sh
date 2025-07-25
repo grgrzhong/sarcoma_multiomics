@@ -14,8 +14,6 @@ bwa_mapping() {
 
     local sample=$1
 
-    echo "$(date +"%F") $(date +"%T") - Processing sample = $sample"
-
     fastq_1="${FASTQ_TRIM_DIR}/${sample}/${sample}_trimmed_1.fastq.gz"
     fastq_2="${FASTQ_TRIM_DIR}/${sample}/${sample}_trimmed_2.fastq.gz"
 
@@ -25,17 +23,22 @@ bwa_mapping() {
         return 1
     fi
 
+    # Create the output directory for the sample
+    mkdir -p "${BAM_DIR}/${sample}"
+
     # BWA Alignment
-    echo "$(date +"%F") $(date +"%T") - Aligning to reference genome..."
+    echo "$(date +"%F") $(date +"%T") - (${sample}) Aligning to reference genome ..."
 
     singularity exec \
-        --bind "${PROJECT_DIR}":"${PROJECT_DIR}" \
-        --bind "${BAM_DIR}":"${BAM_DIR}" \
+        --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
+        --bind "${REFERENCE_DIR}:${REFERENCE_DIR}" \
+        --bind "${FASTQ_TRIM_DIR}:${FASTQ_TRIM_DIR}" \
+        --bind "${BAM_DIR}:${BAM_DIR}" \
         --bind /tmp:/tmp \
         "${CONTAINER_DIR}/bwa.sif" \
         bwa mem \
         -M \
-        -t 16 \
+        -t 8 \
         -R "@RG\tID:${sample}\tLB:XGenV2\tPL:ILLUMINA\tPM:NOVASEQ\tSM:${sample}\tPU:NA" \
         "${REFERENCE}" \
         "${fastq_1}" \
@@ -47,11 +50,11 @@ bwa_mapping() {
     fi
 
     # Convert SAM to BAM
-    echo "$(date +"%F") $(date +"%T") - Converting SAM to BAM..."
+    echo "$(date +"%F") $(date +"%T") - (${sample}) Converting SAM to BAM ..."
 
     singularity exec \
-        --bind "${PROJECT_DIR}":"${PROJECT_DIR}" \
-        --bind "${BAM_DIR}":"${BAM_DIR}" \
+        --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
+        --bind "${BAM_DIR}:${BAM_DIR}" \
         --bind /tmp:/tmp \
         "${CONTAINER_DIR}/samtools.sif" \
         samtools \
@@ -64,11 +67,11 @@ bwa_mapping() {
     fi
 
     # Extract and tag UMI
-    echo "$(date +"%F") $(date +"%T") - Extract and tag UMI..."
+    echo "$(date +"%F") $(date +"%T") - (${sample}) Extract and tag UMI ..."
 
     singularity exec \
-        --bind "${PROJECT_DIR}":"${PROJECT_DIR}" \
-        --bind "${BAM_DIR}":"${BAM_DIR}" \
+        --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
+        --bind "${BAM_DIR}:${BAM_DIR}" \
         --bind /tmp:/tmp \
         "${CONTAINER_DIR}/pysam.sif" \
         python "${MODULE_DIR}/tag_umi.py" \
@@ -81,10 +84,10 @@ bwa_mapping() {
     fi
 
     # Sort by coordinate
-    echo "$(date +"%F") $(date +"%T") - Sorting BAM file..."
+    echo "$(date +"%F") $(date +"%T") - (${sample}) Sorting BAM file ..."
     singularity exec \
-        --bind "${PROJECT_DIR}":"${PROJECT_DIR}" \
-        --bind "${BAM_DIR}":"${BAM_DIR}" \
+        --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
+        --bind "${BAM_DIR}:${BAM_DIR}" \
         --bind /tmp:/tmp \
         "${CONTAINER_DIR}/samtools.sif" \
         samtools sort \
@@ -97,10 +100,10 @@ bwa_mapping() {
     fi
 
     # Mark duplicates
-    echo "$(date +"%F") $(date +"%T") - Marking duplicates..."
+    echo "$(date +"%F") $(date +"%T") - (${sample}) Marking duplicates ..."
     singularity exec \
-        --bind "${PROJECT_DIR}":"${PROJECT_DIR}" \
-        --bind "${BAM_DIR}":"${BAM_DIR}" \
+        --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
+        --bind "${BAM_DIR}:${BAM_DIR}" \
         --bind /tmp:/tmp \
         "${CONTAINER_DIR}/gatk.sif" \
         gatk --java-options "-Xmx4g" MarkDuplicates \
@@ -115,10 +118,10 @@ bwa_mapping() {
     fi
 
     # Index BAM
-    echo "$(date +"%F") $(date +"%T") - Indexing BAM file..."
+    echo "$(date +"%F") $(date +"%T") - (${sample}) Indexing BAM file ..."
     singularity exec \
-        --bind "${PROJECT_DIR}":"${PROJECT_DIR}" \
-        --bind "${BAM_DIR}":"${BAM_DIR}" \
+        --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
+        --bind "${BAM_DIR}:${BAM_DIR}" \
         --bind /tmp:/tmp \
         "${CONTAINER_DIR}/samtools.sif" \
         samtools index "${BAM_DIR}/${sample}/${sample}.marked.bam"
@@ -129,10 +132,10 @@ bwa_mapping() {
     fi
 
     # Base recalibration
-    echo "$(date +"%F") $(date +"%T") - Running base recalibration..."
+    echo "$(date +"%F") $(date +"%T") - (${sample}) Running base recalibration ..."
     singularity exec \
-        --bind "${PROJECT_DIR}":"${PROJECT_DIR}" \
-        --bind "${BAM_DIR}":"${BAM_DIR}" \
+        --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
+        --bind "${BAM_DIR}:${BAM_DIR}" \
         --bind /tmp:/tmp \
         "${CONTAINER_DIR}/gatk.sif" \
         gatk BaseRecalibrator \
@@ -148,10 +151,10 @@ bwa_mapping() {
     fi
 
     # Apply BQSR
-    echo "$(date +"%F") $(date +"%T") - Applying BQSR ..."
+    echo "$(date +"%F") $(date +"%T") - (${sample}) Applying BQSR ..."
     singularity exec \
-        --bind "${PROJECT_DIR}":"${PROJECT_DIR}" \
-        --bind "${BAM_DIR}":"${BAM_DIR}" \
+        --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
+        --bind "${BAM_DIR}:${BAM_DIR}" \
         --bind /tmp:/tmp \
         "${CONTAINER_DIR}/gatk.sif" \
         gatk ApplyBQSR \
@@ -167,10 +170,10 @@ bwa_mapping() {
     fi
 
     # Collect HS metrics
-    echo "$(date +"%F") $(date +"%T") - Collecting HsMetrics..."
+    echo "$(date +"%F") $(date +"%T") - (${sample}) Collecting HsMetrics ..."
     singularity exec \
-        --bind "${PROJECT_DIR}":"${PROJECT_DIR}" \
-        --bind "${BAM_DIR}":"${BAM_DIR}" \
+        --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
+        --bind "${BAM_DIR}:${BAM_DIR}" \
         --bind /tmp:/tmp \
         "${CONTAINER_DIR}/gatk.sif" \
         gatk CollectHsMetrics \
@@ -186,11 +189,11 @@ bwa_mapping() {
     fi
 
     # Generate alignment stats
-    echo "$(date +"%F") $(date +"%T") - Generating alignment stats..."
+    echo "$(date +"%F") $(date +"%T") - (${sample}) Generating alignment stats ..."
     
     singularity exec \
-        --bind "${PROJECT_DIR}":"${PROJECT_DIR}" \
-        --bind "${BAM_DIR}":"${BAM_DIR}" \
+        --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
+        --bind "${BAM_DIR}:${BAM_DIR}" \
         --bind /tmp:/tmp \
         "${CONTAINER_DIR}/bamtools.sif" \
         bamtools stats \
@@ -203,7 +206,7 @@ bwa_mapping() {
     fi
 
     # Clean up intermediate files
-    echo "$(date +"%F") $(date +"%T") - Cleaning up intermediate files..."
+    echo "$(date +"%F") $(date +"%T") - (${sample}) Cleaning up intermediate files ..."
     rm -f  \
         "${BAM_DIR}/${sample}/${sample}.bwa.sam" \
         "${BAM_DIR}/${sample}/${sample}.bwa.bam" \

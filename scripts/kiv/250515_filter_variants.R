@@ -5,7 +5,7 @@ source(here::here("lib/R/study_lib.R"))
 # %% 
 ## Merge all the annovar annoated variants
 ## Run only once
-maf_tbl <- collectAnnovarData(
+maf_tbl <- CollectAnnovarData(
     annovar_dir = "data/wes/variant_calling/mutect2_filter",
     is_save = TRUE,
     save_dir = "data/wes/annotation/merged"
@@ -108,7 +108,7 @@ sample_groups <- list(
     `FS_DFSP` = c("Unpaired FST")
 )
 
-sample_info <- loadSampleInfo() |> 
+sample_info <- LoadSampleInfo() |> 
     filter(Specimen.Class == "Tumour") |> 
     select(
         Sample.ID, Diagnosis, Specimen.Class, Specimen.Nature, Histology.Nature,

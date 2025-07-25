@@ -9,13 +9,7 @@
 ## General configurations ----
 ## "==========================================================================="
 ## Load required libraries and functions
-library(clusterProfiler)
-library(org.Hs.eg.db)
-library(enrichplot)
-library(GSVA)
-library(msigdbr)
 library(maftools)
-
 source(here::here("scripts/lib/study_lib.R"))
 
 ## Output directories
