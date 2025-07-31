@@ -9,138 +9,44 @@ suppressPackageStartupMessages(
 source(here::here("scripts/lib/study_lib.R"))
 
 ## "==========================================================================="
-## Prepare the GISTIC2 data by sample groups ----
+## Process EPIC CNV data for GISTIC2 input ----
 ## "==========================================================================="
-gistic2_file <- here("data/wes/Processed/cnv_facets_DFSP_cohort_gistic2.tsv")
-gistic2_data <- read_tsv(
-    gistic2_file,
+epic_cnv_data <- read_tsv(
+    here("data/epic/GISTIC2/all_tumors/all_tumors.tsv"),
     show_col_types = FALSE
 )
 
-## Split sample into groups
-epic_gistic_dir <- here("data/epic/GISTIC2")
-group_paths <- dir_ls(epic_gistic_dir, glob = "*.seg", recurse = TRUE)
-group_names <- path_file(group_paths) |> str_remove("\\.seg$")
+sample_groups <- LoadSampleGroupInfo(is_somatic_matched = FALSE)[1:11]
+sample_groups$all_tumors <- NULL
 
-## Load all GISTIC2 segment files
-gistic_list <- map2(
-    group_names,
-    group_paths,
-    function(name, path) {
-        message(paste0(" - Processing ", name, " = ", path))
-        read_tsv(
-            path,
-            col_types = cols(
-                Sample = col_character(),
-                Chromosome = col_character(),
-                Start = col_integer(),
-                End = col_integer(),
-                Num_Probes = col_integer(),
-                Segment_Mean = col_double()
-            )
-        )
-    }
-) |>
-    setNames(group_names)
-
-epic_sample_groups <- list()
-for (name in names(gistic_list)) {
-
-    gistic2_data <- gistic_list[[name]]
-
-    samples <- unique(gistic2_data$Sample)
-
-    message(paste0(" - Found ", length(samples), " samples in group: ", name))
-
-    epic_sample_groups[[name]] <- samples
+## Check if there are any NA values for all columns
+na_counts <- sapply(epic_cnv_data, function(x) sum(is.na(x)))
+if (any(na_counts > 0)) {
+    message("There are NA values in the EPIC CNV data:")
+    print(na_counts[na_counts > 0])
+} else {
+    message("No NA values found in the EPIC CNV data.")
 }
 
-## Load DFSP clinical information
-clinical_info <- LoadDFSPClinicalInfo()
+## Split the GISTIC2 input data by sample groups
+for (sample_group in names(sample_groups)) {
 
-wes_sample_groups <- list()
-for (name in names(epic_sample_groups)) {
-
-    samples <- epic_sample_groups[[name]]
-
-    # Filter clinical info for these samples
-    filtered_clinical_info <- clinical_info |> 
-        filter(Sample.ID %in% samples)
-
-    wes_sample_groups[[name]] <- filtered_clinical_info
-}
-
-## "=========================================================================="
-## Generate the WES sample groups
-## "=========================================================================="
-## Patient levele analysi:
-## Main: Choosen the sample with the highest grade: presence of FST
-## Main.Met
-
-wes_sample_groups <- list(
-
-    ## All WES samples, EPIC=150, WES=161
-    `all_tumors` = clinical_info,
-
-    ## FS-DFSP group, EPIC=23, WES=23
-    `FS-DFSP` = clinical_info |> 
-        filter(FST.Group %in% c("FS-DFSP")),
-
-    ## FS-DFSP Meta, EPIC=6, WES=11
-    `FS-DFSP_Meta` = clinical_info |> 
-        filter(FST.Group %in% c("FS-DFSP")) |> 
-        filter(Metastasis == "Yes"),
-
-    ## FS-DFSP Primary Rrecurrence, EPIC=17, WES=17
-    `FS-DFSP_Pri_Rec` = clinical_info |> 
-        filter(FST.Group %in% c("FS-DFSP")) |>
-        filter(Specimen.Nature %in% c("Primary", "Recurrence")),
+    n_samples <- length(sample_groups[[sample_group]])
     
-    ## Post-FST, EPIC=39, WES=41
-    `Post-FST` = clinical_info |> 
-        filter(FST.Group %in% c("Post-FST")),
+    message(
+        paste0("Processing sample group: ", sample_group, " (", n_samples, ")")
+    )
 
-    ## Pre-FST, EPIC=40, WES=45
-    `Pre-FST` = clinical_info |> 
-        filter(FST.Group %in% c("Pre-FST")),
+    group_data <- epic_cnv_data |> 
+        filter(Sample %in% sample_groups[[sample_group]])
 
-    ## U-DFSP, EPIC=48, WES=52
-    `U-DFSP` = clinical_info |> 
-        filter(FST.Group %in% c("U-DFSP")),
+    out_dir <- here("data/epic/GISTIC2", paste0("/", sample_group))
     
-    ## Patient level Metastasis
-    Meta = clinical_info |> 
-        filter(Main.Met == "Yes") |> 
-        filter(Metastasis == "Yes"),
-    
-    `Non-Meta` = clinical_info |> 
-        filter(Main.Met == "Yes") |> 
-        filter(Metastasis == "No")
-)
-
-# Save the WES sample groups to an Excel file
-write_xlsx(
-    wes_sample_groups,
-    here("data/clinical/DFSP_WES_sample_groups.xlsx")
-)
-
-sample_groups <- LoadDFSPSampleGroups()
-
-facets_gistic_list <- map(
-    sample_groups,
-    \(group) {
-        gistic2_data |> filter(Sample %in% group)
-    }
-)
-
-## Save the GISTIC2 data for each sample group
-for (name in names(facets_gistic_list)) {
-    group_data <- facets_gistic_list[[name]]
-    out_dir <- here("data/wes/GISTIC2", name)
     dir_create(out_dir)
+    
     write.table(
         group_data,
-        file = paste0(out_dir, "/", name, ".tsv"),
+        file = paste0(out_dir, "/", sample_group, ".tsv"),
         sep = "\t",
         row.names = FALSE,
         col.names = TRUE,
@@ -149,20 +55,235 @@ for (name in names(facets_gistic_list)) {
 }
 
 ## "==========================================================================="
+## Process wes cnv facet segment data for GISTIC2 input ----
+## "==========================================================================="
+cnv_facet_dir <- here("data/wes/CNV/cnv_facets")
+
+tsv_files <- dir_ls(cnv_facet_dir, glob = "*.tsv", recurse = TRUE) |> 
+    keep(~ str_detect(path_file(.x), "^[^.]+\\.tsv$"))
+
+sample_names <- path_file(tsv_files) |> str_remove("\\.tsv$")
+message(
+    paste0(
+        "Found ", length(sample_names), " sample with CNV Facets data."
+    )
+)
+
+cnv_facet_data <- tibble(
+    sample = sample_names,
+    file = tsv_files
+) |>
+    mutate(
+        data = map2(
+            file,
+            sample,
+            \(f, s) {
+                message(paste0("Reading CNV Facets data for sample: ", s))
+                dat <- read_tsv(
+                    f, 
+                    show_col_types = FALSE, 
+                    col_types = cols(.default = "c")
+                ) 
+                dat
+            },
+            .progress = TRUE
+        )
+    ) |> 
+    unnest(data)
+
+cnv_facet_data |> pull(SVTYPE) |> unique() |> sort()
+## Save the combined CNV Facets data
+write_xlsx(
+    cnv_facet_data,
+    path = here("data/processed/wes_cnv_facets_DFSP_cohort.xlsx"),
+    col_names = TRUE
+)
+
+## Get the GISTIC2 input data
+gistic2_data <- cnv_facet_data |> 
+    filter(SVTYPE != "NEUTR") |> 
+    select(sample, CHROM, POS, END, SVTYPE, TCN_EM, NUM_MARK, CNLR_MEDIAN, dipLogR) |> 
+    mutate(
+        CHROM = str_remove(CHROM, "chr"),
+        POS = as.integer(POS),
+        END = as.integer(END),
+        NUM_MARK = as.integer(NUM_MARK),
+        CNLR_MEDIAN = as.numeric(CNLR_MEDIAN),
+        dipLogR = as.numeric(dipLogR)
+    ) |> 
+    # allele-specific copy number, 
+    # Total copy number >=4 (amplified) and = 0 (deep deletion)
+    # filter(TCN_EM == 0  | TCN_EM > 4) |>
+    ## Remove the X, Y chromosomes
+    filter(!CHROM %in% c("X", "Y")) |> 
+    ## log(total copy number) (https://github.com/mskcc/facets/issues/167)
+    mutate(Segment_Mean = CNLR_MEDIAN - dipLogR) |> 
+    ## Filter out segments that are not estimateable
+    ## Gistic2 run to problem with NA values
+    filter(!is.na(Segment_Mean)) |> 
+    dplyr::rename(
+        Sample = sample,
+        Chromosome = CHROM,
+        Start = POS,
+        End = END,
+        Num_Probes = NUM_MARK
+    ) |> 
+    ## Make sure the the segments to be start < end
+    mutate(
+        Start_fixed = if_else(Start > End, End, Start),
+        End_fixed = if_else(Start > End, Start, End),
+        Chromosome = as.integer(Chromosome),
+    ) |> 
+    select(
+        Sample, Chromosome, Start_fixed, End_fixed, Num_Probes, Segment_Mean
+    ) |> 
+    dplyr::rename(
+        Start = Start_fixed,
+        End = End_fixed
+    ) |> 
+    ## keep segment mean only 3 significant digits
+    mutate(
+        Segment_Mean = round(Segment_Mean, 3)
+    )
+
+## Check if there are any NA values for all columns
+na_counts <- sapply(gistic2_data, function(x) sum(is.na(x)))
+if (any(na_counts > 0)) {
+    message("There are NA values in the GISTIC2 data:")
+    print(na_counts[na_counts > 0])
+} else {
+    message("No NA values found in the GISTIC2 data.")
+}
+
+## Distribution of Segment Means
+hist(
+    gistic2_data$Segment_Mean,
+    breaks = 100,
+    main = "Distribution of Segment Means",
+    xlab = "Segment Mean",
+    col = "lightblue"
+)
+dev.off()
+
+## Save the GISTIC2 input data
+sample_groups <- LoadSampleGroupInfo(is_somatic_matched = FALSE)
+
+write_tsv(
+    gistic2_data,
+    file = here("data/processed/wes_cnv_facets_DFSP_cohort_gistic2.tsv"),
+    na = "NA",
+    quote = "none"
+)
+
+## Split the GISTIC2 data by sample groups
+somatic_matched <- LoadSampleGroupInfo(is_somatic_matched = TRUE)[1:11]
+somatic_unmatched <- LoadSampleGroupInfo(is_somatic_matched = FALSE)[1:11]
+sample_categories <- list(
+    somatic_matched = somatic_matched,
+    somatic_unmatched = somatic_unmatched
+)
+
+for (i in names(sample_categories)) {
+
+    sample_groups <- sample_categories[[i]]
+
+    for (sample_group in names(sample_groups)) {
+
+        n_samples <- length(sample_groups[[sample_group]])
+        
+        message(
+            paste0("Processing sample group: ", sample_group, " (", n_samples, ")")
+        )
+
+        group_data <- gistic2_data |> 
+            filter(Sample %in% sample_groups[[sample_group]])
+
+        out_dir <- here("data/wes/GISTIC2", paste0(i, "/", sample_group))
+        
+        dir_create(out_dir)
+        
+        write.table(
+            group_data,
+            file = paste0(out_dir, "/", sample_group, ".tsv"),
+            sep = "\t",
+            row.names = FALSE,
+            col.names = TRUE,
+            quote = FALSE
+        )
+    }
+}
+
+## Certain samples got not estimated CNV data
+gistic2_data |> pull(Sample) |> unique() |> length()
+
+## "==========================================================================="
+## Find enriched cytobands and genes ----
+## "==========================================================================="
+gistic_dirs <- list(
+    somatic_matched = here("data/wes/GISTIC2/somatic_matched"),
+    somatic_unmatched = here("data/wes/GISTIC2/somatic_unmatched")
+)
+
+comparisons <- list(
+    `Non-Meta_vs_Meta` = c("Non-Meta", "Meta"),
+    `U-DFSP_vs_Pre-FST` = c("U-DFSP", "Pre-FST"),
+    `U-DFSP_vs_Post-FST` = c("U-DFSP", "Post-FST"),
+    `U-DFSP_vs_FS-DFSP` = c("U-DFSP", "FS-DFSP"),
+    `Pre-FST_vs_Post-FST` = c("Pre-FST", "Post-FST"),
+    `Pre-FST_vs_FS-DFSP` = c("Pre-FST", "FS-DFSP"),
+    `Post-FST_vs_FS-DFSP` = c("Post-FST", "FS-DFSP")
+)
+
+stat_res_list <- list()
+
+for (i in names(gistic_dirs)) {
+
+    gistic_dir <- gistic_dirs[[i]]
+    
+    message(paste0("Processing GISTIC2 directory: ", gistic_dir))
+
+    for (comparison in names(comparisons)) {
+
+        group1 <- comparisons[[comparison]][1]
+        group2 <- comparisons[[comparison]][2]
+
+        message(paste0("Comparing: ", group1, " vs ", group2))
+
+        stat_res <- GetGistic2CytobandStatRes(
+            gistic_dir = gistic_dir,
+            group1 = group1,
+            group2 = group2,
+            freq_thres = 0.2,
+            qval_thres = 0.25
+        )
+
+        stat_res_list[[i]][[comparison]]  <- stat_res |> 
+            dplyr::filter(significantly_different) |> 
+            dplyr::filter(enriched_in_group2)
+    }
+
+    filename <- paste0(
+        "wes_cnvfacets_gistic2_group_comparsion_stat_res", i, ".xlsx"
+    )
+
+    write_xlsx(stat_res_list[[i]], path = here("results/wes", filename))
+}
+
+## "==========================================================================="
 ## Explore the GISTIC2 results ----
 ## "==========================================================================="
-## Load required libraries and functions
+clinical_info <- LoadDFSPClinicalInfo()
 
 ## Output directories
-gistic_dir <- "data/wes/GISTIC2"
+gistic_dir <- "data/wes/GISTIC2/somatic_matched"
 # group_name <- "all_tumors"
 
-groups <- dir_ls(gistic_dir) |> path_file()
-
-sample_groups <- LoadDFSPSampleGroups()
-clinical_info <- LoadDFSPClinicalData()
+sample_groups <- LoadSampleGroupInfo()
+# groups <- dir_ls(gistic_dir) |> path_file()
+groups <- names(sample_groups)[1:11]
 
 for (group in groups) {
+
     ## Read the GISTIC2 data
     gistic_obj <- readGistic(
         gisticAllLesionsFile = here(
@@ -174,10 +295,14 @@ for (group in groups) {
         verbose = TRUE
     )
 
+    n_sample <- length(sample_groups[[group]])
+
     ## Plot parameters
     width <- 8
     height <- 4
     out_dir <- "figures/wes/gistic2/cnv_facets"
+
+    dir_create(out_dir)
 
     ## Plot the chromosomal plot
     for (img in c("png", "pdf")) {
@@ -202,151 +327,247 @@ for (group in groups) {
             fdrCutOff = 0.25,
             txtSize = 0.6,
             cytobandTxtSize = 0.5,
-            color = c("#D95F02", "#1B9E77"),
+            color = c("#c82118", "#2c5496"),
             markBands = "all",
             ref.build = "hg38",
-            y_lims = c(-3, 3)
+            y_lims = c(-2, 5)
         )
-
+        title(
+            main = paste0(group, " (", n_sample, ")"),
+            family = "Arial"
+        )
+        
         message(paste0("Saving plot: ", file))
         dev.off()
     }
+}
+    # ## Bubble plot
+    # for (img in c("png", "pdf")) {
+    #     file <- here(
+    #         out_dir,
+    #         paste0("wes_cnvfacets_gistic2_", group, "_bubbleplot.", img)
+    #     )
 
-    ## Bubble plot
-    for (img in c("png", "pdf")) {
-        file <- here(
-            out_dir,
-            paste0("wes_cnvfacets_gistic2_", group, "_bubbleplot.", img)
+    #     if (img == "png") {
+    #         CairoPNG(
+    #             file = file, width = width, height = height, res = 300,
+    #             fonts = "Arial", units = "in"
+    #         )
+    #     } else {
+    #         CairoPDF(
+    #             file = file, width = width, height = height, fonts = "Arial"
+    #         )
+    #     }
+
+    #     gisticBubblePlot(
+    #         gistic = gistic_obj,
+    #         color = c("#D95F02", "#1B9E77"),
+    #         markBands = NULL,
+    #         log_y = TRUE,
+    #         fdrCutOff = 0.25,
+    #         txtSize = 0.6
+    #     )
+
+    #     message(paste0("Saving plot: ", file))
+    #     dev.off()
+    # }
+
+    # ## Oncoplot
+    # for (img in c("png", "pdf")) {
+    #     file <- here(
+    #         out_dir,
+    #         paste0("wes_cnvfacets_gistic2_", group, "_oncoplot.", img)
+    #     )
+
+    #     if (img == "png") {
+    #         CairoPNG(
+    #             file = file, width = width, height = height, res = 300,
+    #             fonts = "Arial", units = "in"
+    #         )
+    #     } else {
+    #         CairoPDF(
+    #             file = file, width = width, height = height, fonts = "Arial"
+    #         )
+    #     }
+
+    #     gisticOncoPlot(
+    #         gistic = gistic_obj,
+    #         sortByAnnotation = FALSE,
+    #         top = 10,
+    #         gene_mar = 10,
+    #         barcode_mar = 10,
+    #         sepwd_genes = 0.5,
+    #         bandsToIgnore = NULL,
+    #         removeNonAltered = TRUE,
+    #         colors = c(
+    #             Amp = "#D95F02",
+    #             Del = "#1B9E77"
+    #         ),
+    #         SampleNamefontSize = 0.6,
+    #         fontSize = 0.8,
+    #         legendFontSize = 0.7,
+    #         annotationFontSize = 1.2,
+    #         borderCol = "white",
+    #         bgCol = "#CCCCCC"
+    #     )
+
+    #     message(paste0("Saving plot: ", file))
+    #     dev.off()
+    # }
+
+
+## "==========================================================================="
+## Non-Meta vs Meta chromosomal plot ---------
+## "==========================================================================="
+## Non-Meta vs Meta - Combined Plot with Aligned Axes
+for (img in c("png", "pdf")) {
+    file <- here(
+        out_dir,
+        paste0("wes_cnvfacets_gistic2_NonMeta_vs_Meta_combined.", img)
+    )
+
+    if (img == "png") {
+        CairoPNG(
+            file = file, width = 8, height = 8, res = 300,
+            fonts = "Arial", units = "in"
+        )
+    } else {
+        CairoPDF(
+            file = file, width = 8, height = 8, fonts = "Arial"
+        )
+    }
+
+    # Set up 2 rows, 1 column layout
+    par(mfrow = c(2, 1), mar = c(3, 4, 3, 2))
+
+    # Read GISTIC objects for both groups
+    gistic_obj_nonmeta <- readGistic(
+        gisticAllLesionsFile = here(gistic_dir, "Non-Meta", "all_lesions.conf_99.txt"),
+        gisticAmpGenesFile = here(gistic_dir, "Non-Meta", "amp_genes.conf_99.txt"),
+        gisticDelGenesFile = here(gistic_dir, "Non-Meta", "del_genes.conf_99.txt"),
+        gisticScoresFile = here(gistic_dir, "Non-Meta", "scores.gistic"),
+        verbose = FALSE
+    )
+    
+    gistic_obj_meta <- readGistic(
+        gisticAllLesionsFile = here(gistic_dir, "Meta", "all_lesions.conf_99.txt"),
+        gisticAmpGenesFile = here(gistic_dir, "Meta", "amp_genes.conf_99.txt"),
+        gisticDelGenesFile = here(gistic_dir, "Meta", "del_genes.conf_99.txt"),
+        gisticScoresFile = here(gistic_dir, "Meta", "scores.gistic"),
+        verbose = FALSE
+    )
+
+    n_sample_nonmeta <- length(sample_groups[["Non-Meta"]])
+
+    n_sample_meta <- length(sample_groups[["Meta"]])
+
+    # Plot 1: Non-Meta (top panel, no x-axis labels)
+    gisticChromPlot(
+        gistic = gistic_obj_nonmeta,
+        fdrCutOff = 0.25,
+        txtSize = 0.6,
+        cytobandTxtSize = 0.5,
+        color = c("#c82118", "#2c5496"),
+        ref.build = "hg38",
+        y_lims = c(-2, 5)  # Same y-limits for both plots
+    )
+    title(main = paste0("Non-Meta (n=", n_sample_nonmeta, ")"), family = "Arial", cex.main = 1.2)
+
+    # Plot 2: Meta (bottom panel, with x-axis labels)
+    par(mar = c(5, 4, 1, 2))  # More bottom margin for x-axis labels
+    gisticChromPlot(
+        gistic = gistic_obj_meta,
+        fdrCutOff = 0.25,
+        txtSize = 0.6,
+        cytobandTxtSize = 0.5,
+        color = c("#c82118", "#2c5496"),
+        ref.build = "hg38",
+        y_lims = c(-2, 5)  # Same y-limits for both plots
+    )
+    title(
+        main = paste0("Meta (n=", n_sample_meta, ")"), 
+        family = "Arial", cex.main = 1.2
+    )
+
+    # Reset par settings
+    par(mfrow = c(1, 1))
+    
+    message(paste0("Saving combined plot: ", file))
+    dev.off()
+}
+
+## "==========================================================================="
+## Gistic plot group comparsions ---------
+## "==========================================================================="
+plot_para <- list(
+    plot_dir = "figures/gistic2",
+    gistic_data = list(
+        epic_cnv = list(
+            gistic_dir = here("data/epic/GISTIC2"),
+            plot_filename = "epic_cnv_gistic2"
+        ),
+        somatic_matched_samples = list(
+            gistic_dir = here("data/wes/GISTIC2/somatic_matched"),
+            plot_filename = "wes_cnvfacets_gistic2_somatic_matched_samples"
+        ),
+        all_samples = list(
+            gistic_dir = here("data/wes/GISTIC2/somatic_unmatched"),
+            plot_filename = "wes_cnvfacets_gistic2_all_samples"   
+        )
+    ),
+    group_list = list(
+        Metastatsis = c("Non-Meta", "Meta"),
+        FST.subtype = c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP")
+    )
+)
+
+for (i in names(plot_para$gistic_data)) {
+
+    if (i == "somatic_matched") {
+
+        is_somatic_matched <- TRUE
+
+    } else {
+        
+        is_somatic_matched <- FALSE
+    }
+
+    for (group in names(plot_para$group_list)) {
+        
+        message(
+            paste0("\nPlotting GISTIC2 results for: ", group)
         )
 
-        if (img == "png") {
-            CairoPNG(
-                file = file, width = width, height = height, res = 300,
-                fonts = "Arial", units = "in"
-            )
-        } else {
-            CairoPDF(
-                file = file, width = width, height = height, fonts = "Arial"
-            )
-        }
+        gistic_dir <- plot_para$gistic_data[[i]]$gistic_dir
 
-        gisticBubblePlot(
-            gistic = gistic_obj,
-            color = c("#D95F02", "#1B9E77"),
-            markBands = NULL,
-            log_y = TRUE,
+        groups <- plot_para$group_list[[group]]
+
+        filename <- paste0(
+            plot_para$gistic_data[[i]]$plot_filename, "_", group
+        )
+
+        plot_dir <- plot_para$plot_dir
+
+        
+        PlotGisticGroupComparsion(
+            gistic_dir = gistic_dir,
+            groups = groups,
+            is_somatic_matched = is_somatic_matched,
             fdrCutOff = 0.25,
-            txtSize = 0.6
+            markBands = NULL,
+            color = c("#c82118", "#2c5496"),
+            ref.build = "hg38",
+            cytobandOffset = 0.05,
+            txtSize = 0.8,
+            cytobandTxtSize = 0.7,
+            y_lims = NULL,
+            width = 8,
+            height = 8,
+            plot_dir = plot_dir,
+            filename = filename
         )
-
-        message(paste0("Saving plot: ", file))
-        dev.off()
-    }
-
-    ## Oncoplot
-    for (img in c("png", "pdf")) {
-        file <- here(
-            out_dir,
-            paste0("wes_cnvfacets_gistic2_", group, "_oncoplot.", img)
-        )
-
-        if (img == "png") {
-            CairoPNG(
-                file = file, width = width, height = height, res = 300,
-                fonts = "Arial", units = "in"
-            )
-        } else {
-            CairoPDF(
-                file = file, width = width, height = height, fonts = "Arial"
-            )
-        }
-
-        gisticOncoPlot(
-            gistic = gistic_obj,
-            sortByAnnotation = FALSE,
-            top = 10,
-            gene_mar = 10,
-            barcode_mar = 10,
-            sepwd_genes = 0.5,
-            bandsToIgnore = NULL,
-            removeNonAltered = TRUE,
-            colors = c(
-                Amp = "#D95F02",
-                Del = "#1B9E77"
-            ),
-            SampleNamefontSize = 0.6,
-            fontSize = 0.8,
-            legendFontSize = 0.7,
-            annotationFontSize = 1.2,
-            borderCol = "white",
-            bgCol = "#CCCCCC"
-        )
-
-        message(paste0("Saving plot: ", file))
-        dev.off()
     }
 }
-
-## "==========================================================================="
-## Find enriched cytobands and genes ----
-## "==========================================================================="
-gistic_dir <- here("data/wes/GISTIC2/cnv_facets")
-
-comparisons <- list(
-    `Non-Meta_vs_Meta` = c("Non-Meta", "Meta"),
-    `U-DFSP_vs_Pre-FST` = c("U-DFSP", "Pre-FST"),
-    `U-DFSP_vs_Post-FST` = c("U-DFSP", "Post-FST"),
-    `U-DFSP_vs_FS-DFSP` = c("U-DFSP", "FS-DFSP"),
-    `Pre-FST_vs_Post-FST` = c("Pre-FST", "Post-FST"),
-    `Pre-FST_vs_FS-DFSP` = c("Pre-FST", "FS-DFSP"),
-    `Post-FST_vs_FS-DFSP` = c("Post-FST", "FS-DFSP")
-)
-
-stat_list <- list()
-
-for (comparison in names(comparisons)) {
-
-    group1 <- comparisons[[comparison]][1]
-    group2 <- comparisons[[comparison]][2]
-
-    message(paste0("Comparing: ", group1, " vs ", group2))
-
-    stat_list[[comparison]] <- GetStatResGistic2(
-        gistic_dir = gistic_dir,
-        group1 = group1,
-        group2 = group2,
-        freq_thres = 0.2,
-        qval_thres = 0.25
-    )
-}
-
-for (name in names(stat_list)) {
-
-    output <- stat_list[[name]]
-
-    write_xlsx(
-        output,
-        path = here(
-            "results/wes", paste0("wes_cnvfacets_gistic2_", name, ".xlsx")
-        )
-    )
-}
-
-test <- stat_list$`Non-Meta_vs_Meta`[["cytoband"]] |> 
-    as_tibble()
-
-test |> 
-    filter(fisher_qvalue < 0.05) |> 
-    filter(enriched_in_group2 | depleted_in_group2) |> 
-    view()
-
-stat_res <- GetStatResGistic2(
-    gistic_dir = gistic_dir,
-    group1 = group1,
-    group2 = group2,
-    freq_thres = 0.2,
-    qval_thres = 0.25
-)
 
 # PlotGistic2Chrom <- 
 

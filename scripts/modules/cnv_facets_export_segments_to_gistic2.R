@@ -59,6 +59,8 @@ if (!file.exists(opt$input)) {
 
 # Read input, treating "." as NA for relevant columns
 # https://github.com/dariober/cnv_facets
+# Note: Seg.CN = CNLR.MEDIAN - dipLogR.
+# https://github.com/dariober/cnv_facets/issues/52
 required_input_cols <- c("CHROM", "POS", "END", "NUM_MARK", "CNLR_MEDIAN")
 
 input_tsv <- readr::read_tsv(

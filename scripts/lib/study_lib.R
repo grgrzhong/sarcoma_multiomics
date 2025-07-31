@@ -11,6 +11,7 @@ suppressPackageStartupMessages(
         library(ggpubr)
         library(rstatix)
         library(ggrepel)
+        library(janitor)
         library(Cairo)
         library(tidyverse)
     })
@@ -435,7 +436,7 @@ LoadSampleInfo <- function() {
     )
 }
 
-loadOncoKBGeneList <- function() {
+LoadOncoKBGeneList <- function() {
     file_path <- here("data/public/cancerGeneList.tsv")
 
     if (!file_exists(file_path)) {
@@ -1485,7 +1486,7 @@ addDFSPGroupInfo <- function(maf_tbl) {
     maf_tbl
 }
 
-collectPCGRCNAData <- function(
+CollectPCGRCNAData <- function(
     dir, 
     sig_gain_thres = NULL
 ) {
@@ -1511,26 +1512,26 @@ collectPCGRCNAData <- function(
 
         cna_data <- read_tsv(file, show_col_types = FALSE) |> 
             mutate(
-                total_cnv = CN_MAJOR + CN_MINOR
+                total_cn = CN_MAJOR + CN_MINOR,
+                .after = CN_MINOR
             )
         
-        if (!is.null(sig_gain_thres)) {
-            cna_data <- cna_data |>
-                filter(total_cnv >=4 | total_cnv == 0)
-        }   
+        # if (!is.null(sig_gain_thres)) {
+        #     cna_data <- cna_data |>
+        #         filter(total_cnv >=4 | total_cnv == 0)
+        # }   
 
         cna_list[[file]] <- cna_data
 
     }
     
-    cna_tbl <- list_rbind(cna_list) |> 
-        janitor::clean_names()
+    cna_tbl <- list_rbind(cna_list) |> janitor::clean_names()
 
     ## Return
     cna_tbl
 }
 
-collectPCGRSNVINDELData <- function(
+CollectPCGRSNVINDELData <- function(
     dir, 
     sheet_name="SOMATIC_SNV_INDEL"
 ) {
@@ -1652,7 +1653,7 @@ filterPCGRData <- function(
     unique(pcgr_data$exonic_status)
 
     ## OncoKB gene list
-    oncokb_genes <- loadOncoKBGeneList()
+    oncokb_genes <- LoadOncoKBGeneList()
     oncokb_genes <- pcgr_data |> 
         filter(symbol %in% oncokb_genes) |>
         pull(symbol) |> 
@@ -1860,7 +1861,7 @@ filterPCGRData <- function(
     final_variants
 }
 
-convertPCGRToMaftools <- function(pcgr_tbl) {
+ConvertPCGRToMaftools <- function(pcgr_tbl) {
 
     maf_tbl <- pcgr_tbl |>
         # Extract chromosome and position from genomic_change
@@ -2118,6 +2119,7 @@ loadDFSPColorConfigs <- function() {
     )
 }
 
+
 LoadDFSPSampleGroups <- function() {
 
     file <- here("data/clinical/DFSP_WES_sample_groups.xlsx")
@@ -2135,6 +2137,123 @@ LoadDFSPSampleGroups <- function() {
 
     # return
     sample_groups
+}
+
+LoadSampleGroupInfo <- function(is_somatic_matched = FALSE) {
+
+    ## Load the clinical info
+    clinical_info <- LoadDFSPClinicalInfo()
+
+    if (is_somatic_matched) {
+        
+        ## Filter out the samples that are not somatic matched
+        clinical_info <- clinical_info |> 
+            filter(Somatic.Status == "Matched")
+    }
+
+    ## Generate the WES sample groups
+    ## Patient levele analysi:
+    ## Main: Choosen the sample with the highest grade: presence of FST
+    ## Main.Met
+
+    ## "-----------------------------------------------------------------"
+    ## All WES samples, EPIC=150, WES=161
+    ## "-----------------------------------------------------------------"
+    all_tumors <- clinical_info |> pull(Sample.ID)
+
+    ## "-----------------------------------------------------------------"
+    ## Overall FST group
+    ## "-----------------------------------------------------------------"
+    FST <- clinical_info |> filter(FST == "Yes") |> pull(Sample.ID)
+
+    `Non-FST` <- clinical_info |> filter(FST == "No") |> pull(Sample.ID)
+
+    ## "-----------------------------------------------------------------"
+    ## Overall Metastasis group
+    ## "-----------------------------------------------------------------"
+    ## The column "Metastasis", it means whether the patient has metastasis, 
+    ## but the same patient can have samples coming from 
+    ## primary site or metastatic site
+    ## Patient level Metastasis
+    Meta <- clinical_info |> filter(Metastasis == "Yes") |> pull(Sample.ID)
+
+    `Non-Meta` <- clinical_info |> filter(Metastasis == "No") |> pull(Sample.ID)
+
+    ## "-----------------------------------------------------------------"
+    ## FST.subgroup
+    ## "-----------------------------------------------------------------"
+
+    ## U-DFSP, EPIC=48, WES=52
+    `U-DFSP` = clinical_info |> 
+        filter(FST.Group %in% c("U-DFSP")) |> 
+        pull(Sample.ID)
+    
+    ## Pre-FST, EPIC=40, WES=45
+    `Pre-FST` = clinical_info |> 
+        filter(FST.Group %in% c("Pre-FST")) |> 
+        pull(Sample.ID)
+
+    ## Post-FST, EPIC=39, WES=41
+    `Post-FST` = clinical_info |> 
+        filter(FST.Group %in% c("Post-FST")) |> 
+        pull(Sample.ID)
+
+    ## FS-DFSP group, EPIC=23, WES=23
+    `FS-DFSP` = clinical_info |> 
+        filter(FST.Group %in% c("FS-DFSP")) |> 
+        pull(Sample.ID)
+
+    ## "-----------------------------------------------------------------"
+    ## FS-DFSP subgroup
+    ## "-----------------------------------------------------------------"
+    ## FS-DFSP Meta, EPIC=6, WES=11
+    `FS-DFSP_Meta` = clinical_info |> 
+        filter(FST.Group %in% c("FS-DFSP")) |> 
+        filter(Metastasis == "Yes") |> 
+        pull(Sample.ID)
+
+    ## FS-DFSP Primary Rrecurrence, EPIC=17, WES=17
+    `FS-DFSP_Pri_Rec` = clinical_info |> 
+        filter(FST.Group %in% c("FS-DFSP")) |>
+        filter(Specimen.Nature %in% c("Primary", "Recurrence")) |> 
+        pull(Sample.ID)
+
+    ## "-----------------------------------------------------------------"
+    ## Comparsion groups
+    ## "-----------------------------------------------------------------"
+    `Non-Meta_vs_Meta` <- c(`Non-Meta`, Meta)
+    `Non-FST_vs_FST` <- c(`Non-FST`, FST)
+    `U-DFSP_vs_Pre-FST` <- c(`U-DFSP`, `Pre-FST`)
+    `Pre-FST_vs_Post-FST` <- c(`Pre-FST`, `Post-FST`)
+    `Post-FST_vs_FS-DFSP` <- c(`Post-FST`, `FS-DFSP`)
+    `FS-DFSP_Pri_Rec_vs_FS-DFSP_Meta` <- c(
+        `FS-DFSP_Pri_Rec`, `FS-DFSP_Meta`
+    )
+
+    # return
+    list(
+        ## single groups
+        "all_tumors" = all_tumors,
+        "FST" = FST,
+        "Non-FST" = `Non-FST`,
+        "Meta" = Meta,
+        "Non-Meta" = `Non-Meta`,
+        "U-DFSP" = `U-DFSP`,
+        "Pre-FST" = `Pre-FST`,
+        "Post-FST" = `Post-FST`,
+        "FS-DFSP" = `FS-DFSP`,
+        "FS-DFSP_Pri_Rec" = `FS-DFSP_Pri_Rec`,
+        "FS-DFSP_Meta" = `FS-DFSP_Meta`,
+
+        ## comparsion groups
+        "Non-Meta_vs_Meta" = `Non-Meta_vs_Meta`,
+        "Non-FST_vs_FST" = `Non-FST_vs_FST`,
+        "U-DFSP_vs_Pre-FST" = `U-DFSP_vs_Pre-FST`,
+        "Pre-FST_vs_Post-FST" = `Pre-FST_vs_Post-FST`,
+        "Post-FST_vs_FS-DFSP" = `Post-FST_vs_FS-DFSP`,
+        "FS-DFSP_Pri_Rec_vs_FS-DFSP_Meta" = `FS-DFSP_Pri_Rec_vs_FS-DFSP_Meta`
+    )
+
 }
 
 loadMsigdbGeneSet <- function() {
@@ -2244,7 +2363,7 @@ cleanGeneSetName <- function(msigdb_gs) {
             )
 }
 
-collectCNVFacets <- function(facet_dir) {
+CollectCNVFacets <- function(facet_dir) {
 
     facet_files <- dir_ls(
         facet_dir, 
@@ -2303,9 +2422,9 @@ getDFSPSampleGroups <- function(sample_ids) {
 
 }
 
-loadDFSPWESSamples <- function() {
+LoadDFSPWESSamples <- function() {
 
-    sample_info_dir <- "data/WES/sample_info"
+    sample_info_dir <- "data/clinical"
 
     paired_tumor_samples <- read_tsv(
         here(sample_info_dir, "tumour_paired_samples.txt"),
@@ -2963,7 +3082,7 @@ GetStatResGistic2 <- function(
     g2_cytoband_del <- g2_cytoband |> filter(Variant_Classification == "Del")
 
     ## Cytoband comparison
-    cytoband_comparison_amp <- Gistic2CompareCytoband(
+    cytoband_comparison_amp <- GetGistic2GroupCytobandData(
         cytoband1 = g1_cytoband_amp,
         cytoband2 = g2_cytoband_amp,
         alteration_type = "Amp",
@@ -2973,7 +3092,7 @@ GetStatResGistic2 <- function(
         qval_thres = qval_thres
     )
     
-    cytoband_comparison_del <- Gistic2CompareCytoband(
+    cytoband_comparison_del <- GetGistic2GroupCytobandData(
         cytoband1 = g1_cytoband_del,
         cytoband2 = g2_cytoband_del,
         alteration_type = "Del",
@@ -3068,9 +3187,110 @@ GetStatResGistic2 <- function(
 
 }
 
-Gistic2CompareCytoband <- function(
-    cytoband1, cytoband2, alteration_type,
-    g1_total_samples, g2_total_samples, freq_thres, qval_thres
+GetGistic2CytobandStatRes <- function(
+    gistic_dir,
+    group1,
+    group2,
+    freq_thres = 0.2,
+    qval_thres = 0.25
+) {
+
+    ## Load GISTIC data in maftools objects
+    g1_obj <- readGistic(
+        gisticAllLesionsFile = here(gistic_dir, group1, "all_lesions.conf_99.txt"),
+        gisticAmpGenesFile = here(gistic_dir, group1, "amp_genes.conf_99.txt"),
+        gisticDelGenesFile = here(gistic_dir, group1, "del_genes.conf_99.txt"),
+        gisticScoresFile = here(gistic_dir, group1, "scores.gistic"),
+        verbose = FALSE
+    )
+
+    g2_obj <- readGistic(
+        gisticAllLesionsFile = here(gistic_dir, group2, "all_lesions.conf_99.txt"),
+        gisticAmpGenesFile = here(gistic_dir, group2, "amp_genes.conf_99.txt"),
+        gisticDelGenesFile = here(gistic_dir, group2, "del_genes.conf_99.txt"),
+        gisticScoresFile = here(gistic_dir, group2, "scores.gistic"),
+        verbose = FALSE
+    )
+
+    # head(g1_obj@data)
+    # head(g1_obj@gis.scores)
+    # sample_groups <- LoadSampleGroupInfo(is_somatic_matched = is_somatic_matched)
+    
+    # g1_total_sampel = length(sample_groups[[group1]])
+
+    ## Get sample counts for proper frequency calculation
+    g1_total_samples <- length(getSampleSummary(g1_obj)$Tumor_Sample_Barcode)
+    g2_total_samples <- length(getSampleSummary(g2_obj)$Tumor_Sample_Barcode)
+
+    message(paste("Group 1 (", group1, ") samples:", g1_total_samples))
+    message(paste("Group 2 (", group2, ") samples:", g2_total_samples))
+
+    ## "==================================================================="
+    ## Cytoband-level comparison ----
+    ## "==================================================================="
+    ## Extract cytoband-level data
+    g1_cytoband <- getCytobandSummary(g1_obj)
+    g2_cytoband <- getCytobandSummary(g2_obj)
+
+    ## Separate amplifications and deletions
+    g1_cytoband_amp <- g1_cytoband |> filter(Variant_Classification == "Amp")
+    g1_cytoband_del <- g1_cytoband |> filter(Variant_Classification == "Del")
+    
+    g2_cytoband_amp <- g2_cytoband |> filter(Variant_Classification == "Amp")
+    g2_cytoband_del <- g2_cytoband |> filter(Variant_Classification == "Del")
+
+    ## Cytoband comparison
+    cytoband_comparison_amp <- GetGistic2GroupCytobandData(
+        cytoband1 = g1_cytoband_amp,
+        cytoband2 = g2_cytoband_amp,
+        alteration_type = "Amp",
+        g1_total_samples = g1_total_samples,
+        g2_total_samples = g2_total_samples,
+        freq_thres = freq_thres,
+        qval_thres = qval_thres
+    )
+    
+    cytoband_comparison_del <- GetGistic2GroupCytobandData(
+        cytoband1 = g1_cytoband_del,
+        cytoband2 = g2_cytoband_del,
+        alteration_type = "Del",
+        g1_total_samples = g1_total_samples,
+        g2_total_samples = g2_total_samples,
+        freq_thres = freq_thres,
+        qval_thres = qval_thres
+    )
+    
+    cytoband_comparison_results <- rbind(
+        cytoband_comparison_amp, 
+        cytoband_comparison_del
+    ) |> 
+        as_tibble()
+
+    ## Statistical testing (Fisher's exact test for each cytoband)
+    cytoband_stat_res <- Gistic2CytobandStat(
+        cytoband_comparison_results, 
+        adj_method = "BH"
+    )
+    
+    # cytoband_sig <- cytoband_stat_res |> 
+    #     dplyr::filter(significantly_different)
+    
+    # cytoband_sig_g2 <- cytoband_sig |> 
+    #     filter(enriched_in_group2)
+
+    ## return
+    cytoband_stat_res
+
+}
+
+GetGistic2GroupCytobandData <- function(
+    cytoband1, 
+    cytoband2, 
+    alteration_type,
+    g1_total_samples, 
+    g2_total_samples, 
+    freq_thres, 
+    qval_thres
 ) {
     
     ## Get all unique cytobands
@@ -3163,16 +3383,16 @@ Gistic2CompareCytoband <- function(
                 group1_freq = round(freq1, 3),
                 group2_freq = round(freq2, 3),
                 freq_difference = round(freq_diff, 3),
-                fold_change = ifelse(freq1 > 0, round(freq2 / freq1, 2), Inf),
-                group1_qval = qval1,
-                group2_qval = qval2,
+                # fold_change = ifelse(freq1 > 0, round(freq2 / freq1, 2), Inf),
+                group1_gistic2_qval = qval1,
+                group2_gistic2_qval = qval2,
                 group1_genes = genes1,
                 group2_genes = genes2,
                 group1_peak = peak1,
                 group2_peak = peak2,
-                enriched = freq_diff > freq_thres,
-                significant_in_group1 = qval1 < qval_thres,
-                significant_in_group2 = qval2 < qval_thres,
+                # enriched = freq_diff > freq_thres,
+                sig_in_group1 = qval1 < qval_thres,
+                sig_in_group2 = qval2 < qval_thres,
                 specific_in_group2 = count1 == 0 & count2 > 0,
                 stringsAsFactors = FALSE
             )
@@ -3390,4 +3610,211 @@ Gistic2CytobandStat <- function(
         )
 
     cytoband_comparison_results
+}
+
+BoxPlotCompareGroups <- function(
+    data, # a tibble
+    x,
+    y,
+    y_lab,
+    y_lim = NULL,
+    title = NULL,
+    stat_method = "wilcox_test", # t-test, wilcox_test
+    alternative = "two.sided", # "greater", "less"
+    step_increase = 0.03,
+    p_vjust = 0
+) {
+    
+    ## Do the statistical test
+    data <- data |> 
+        mutate(value = !!sym(y), group = !!sym(x))
+
+    if (stat_method == "t_test") {
+
+        stat_test <- data |>
+            t_test(
+                value ~ group,
+                alternative = alternative,
+                detailed = TRUE
+            ) |>
+            add_significance() |>
+            add_xy_position(x = "group", dodge = 0.9)
+
+    } else if (stat_method == "wilcox_test") {
+
+        stat_test <- data |>
+            wilcox_test(
+                value ~ group,
+                alternative = alternative,
+                detailed = TRUE
+            ) |>
+            add_significance() |>
+            add_xy_position(x = "group", dodge = 0.9)
+
+    } else {
+
+        stop("Unknown test")
+    }
+
+    stat_test <- stat_test |> 
+        dplyr::mutate(
+            p_label = ifelse(
+                p < 0.05,
+                paste0("p = ", scales::pvalue(p), "", p.signif),
+                paste0("p = ", scales::pvalue(p))
+            )
+        )
+
+    print(stat_test)
+
+    ## Plot the boxplot
+    ggboxplot(
+        data,
+        x = x, y = y,
+        fill = x,
+        size = 0.2,
+        width = 0.5,
+        alpha = 0.2,
+        add = "jitter",
+        add.params = list(size = 1, alpha = 0.8, shape = 21)
+    ) +
+        stat_pvalue_manual(
+            stat_test,
+            # label = "p.signif",
+            # label = "p ={p}, n={n1 + n2}",
+            # label = "p = {scales::pvalue(p)}, n = {n1 + n2}",
+            label = "p_label",
+            size = 0.1,
+            label.size = 2,
+            bracket.size = 0.3,
+            tip.length = 0,
+            # xmin = "xmin",
+            # xmax = "xmax",
+            # y.position = "y.position",
+            step.increase = step_increase,
+            bracket.nudge.y = 0.1,
+            vjust = -0.2,
+            hide.ns = FALSE
+        ) +
+        scale_y_continuous(
+            limits = y_lim,
+            expand = expansion(mult = c(0.15))
+            # expand = c(0, 0.2)
+        ) +
+        scale_fill_manual(
+            # name = NULL,
+            # labels = c("Control", "PV"),
+            values = c("#1f77b4", "#ff7f0e")
+        ) +
+        labs(
+            x = NULL,
+            y = y_lab,
+            title = title
+        ) +
+        figure_theme2() +
+        theme(
+            # axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+            axis.title.y = element_text(vjust = 0, hjust = 0.5),
+            # legend.position = "bottom",
+            # legend.box.spacing = unit(0, "pt"),
+            plot.margin = unit(c(0.3, 0.1, 0.1, 0.1), units = "cm")
+        )
+
+}
+
+PlotGisticGroupComparsion <- function(
+    gistic_dir = "data/wes/gistic2/somatic_matched",
+    groups = c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP"),
+    is_somatic_matched = FALSE,
+    fdrCutOff = 0.25,
+    markBands = NULL,
+    color = c("#c82118", "#2c5496"),
+    ref.build = "hg38",
+    cytobandOffset = 0.01,
+    txtSize = 0.6,
+    cytobandTxtSize = 0.3,
+    maf = NULL,
+    mutGenes = NULL,
+    y_lims = NULL,
+    mutGenesTxtSize = 0.6,
+    width = 8,
+    height = 8,
+    plot_dir = "figures/gistic2",
+    filename = "wes_cnvfacets_gistic2_FST.subgroup"
+) {
+    
+    ## Load group info
+    sample_groups <- LoadSampleGroupInfo(
+        is_somatic_matched = is_somatic_matched
+    )
+
+    dir_create(here(plot_dir))
+
+    ## plot the chromosomal plots
+    for (img in c("png", "pdf")) {
+        
+        file <- here(plot_dir, paste0(filename, ".", img))
+
+        if (img == "png") {
+            CairoPNG(
+                file = file, width = width, height = height, res = 300,
+                fonts = "Arial", units = "in"
+            )
+        } else {
+            CairoPDF(
+                file = file, width = width, height = height, fonts = "Arial"
+            )
+        }
+
+        # Set up 4 rows, 1 column layout
+        nrow = length(groups)
+
+        par(mfrow = c(nrow, 1), mar = c(3, 4, 3, 2))
+
+        # Read GISTIC objects for both groups
+        gistic_obj_list <- list()
+        for (group in groups) {
+
+            gistic_obj_list[[group]] <- readGistic(
+                gisticAllLesionsFile = here(gistic_dir, group, "all_lesions.conf_99.txt"),
+                gisticAmpGenesFile = here(gistic_dir, group, "amp_genes.conf_99.txt"),
+                gisticDelGenesFile = here(gistic_dir, group, "del_genes.conf_99.txt"),
+                gisticScoresFile = here(gistic_dir, group, "scores.gistic"),
+                verbose = FALSE
+            )
+
+        }
+
+        ## Plot the chromosomal plots for each group
+        for (group in names(gistic_obj_list)) {
+            
+            # n_sample <- length(sample_groups[[group]])
+            n_sample <- gistic_obj_list[[group]]@summary |> 
+                filter(ID =="Samples") |> 
+                pull(summary)
+
+            # Plot the chromosomal plot
+            gisticChromPlot(
+                gistic = gistic_obj_list[[group]],
+                fdrCutOff = fdrCutOff,
+                markBands = markBands,
+                color = color,
+                ref.build = ref.build,
+                cytobandOffset = cytobandOffset,
+                txtSize = txtSize,
+                cytobandTxtSize = cytobandTxtSize,
+                maf = maf,
+                mutGenes = mutGenes,
+                mutGenesTxtSize = mutGenesTxtSize,
+                y_lims = y_lims
+            )
+            title(main = paste0(group, " (n=", n_sample, ")"), family = "Arial")
+        }
+        # Reset par settings
+        par(mfrow = c(1, 1))
+        
+        message(paste0("Saving combined plot: ", file))
+        dev.off()
+    }
+
 }

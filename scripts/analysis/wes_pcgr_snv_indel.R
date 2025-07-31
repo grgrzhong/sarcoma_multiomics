@@ -9,12 +9,19 @@
 ## General configurations ----
 ## "==========================================================================="
 ## Load required libraries and functions
-library(maftools)
+suppressPackageStartupMessages(
+    suppressWarnings({
+        library(maftools)
+        library(circlize)
+        library(ComplexHeatmap)
+        library(reshape2)
+    })
+)
 source(here::here("scripts/lib/study_lib.R"))
 
 ## Output directories
-data_dir <- "data/WES/collect"
-plot_dir <- "figures/wes"
+data_dir <- "data/processed"
+plot_dir <- "figures/wes/pcgr"
 
 ## Capture size
 capture_size <- 34 
@@ -22,24 +29,66 @@ capture_size <- 34
 ## Clinical information
 clinical_info <- LoadDFSPClinicalInfo()
 
-# clinical_info |> 
-#     select(
-#         Case.ID, Sample.ID, Main, Main.Met, Metastasis
-#     ) |> 
-#     view()
-
 ## "==========================================================================="
 ## Collect PCGR CNV data --------------
 ## "==========================================================================="
 ## Merge all PCGR outputs
 pcgr_dir <- "data/wes/PCGR"
-pcgr_cna_data <- collectPCGRCNAData(
+pcgr_cna_data <- CollectPCGRCNAData(
     dir = pcgr_dir, 
     sig_gain_thres = 4
 )
 
-## Paired samples
-paired_samples <- loadDFSPWESSamples()[["paired"]]
+colnames(pcgr_cna_data)
+
+unique(pcgr_cna_data$variant_class)
+
+sample_groups <- LoadSampleGroupInfo()[1:11]
+
+cytoband_stats <- pcgr_cna_data %>%
+    group_by(cytoband, variant_class) %>%
+    summarise(
+        n_samples = n_distinct(sample_id),
+        n_genes = n_distinct(symbol),
+        total_samples = n_distinct(pcgr_cna_data$sample_id),
+        frequency = n_samples / total_samples,
+        avg_segment_size = mean(segment_length_mb, na.rm = TRUE),
+        median_segment_size = median(segment_length_mb, na.rm = TRUE),
+        .groups = "drop"
+    ) %>%
+    arrange(desc(frequency))
+
+## Statistical significance testing using binomial test
+## Assume background alteration rate based on genome-wide analysis
+background_rate_gain <- 0.05  # 5% background for gains
+background_rate_loss <- 0.03  # 3% background for losses
+cytoband_stats <- cytoband_stats %>%
+    mutate(
+        background_rate = case_when(
+            variant_class == "gain" ~ background_rate_gain,
+            variant_class == "homdel" ~ background_rate_loss,
+            TRUE ~ 0.04
+        ),
+        # Binomial test for significance
+        p_value = pmap_dbl(list(n_samples, total_samples, background_rate), 
+                          function(n, total, bg) {
+                              binom.test(n, total, p = bg, alternative = "greater")$p.value
+                          }),
+        # Multiple testing correction
+        q_value = p.adjust(p_value, method = "BH")
+    )
+
+## 3. Filter for significant cytobands
+significant_cytobands <- cytoband_stats %>%
+    filter(
+        q_value < 0.05,           # FDR < 5%
+        frequency >= 0.10,        # At least 10% frequency
+        n_samples >= 5            # At least 5 samples
+    ) %>%
+    arrange(q_value, desc(frequency))
+
+print("Significantly altered cytobands:")
+print(significant_cytobands)
 
 ## Filter the CNA data
 pcgr_cna_data <- pcgr_cna_data |> 
@@ -71,7 +120,7 @@ gene_freq %>%
 ## Merge all PCGR outputs
 pcgr_dir <- "data/WES/PCGR"
 sheet_name <- "SOMATIC_SNV_INDEL"
-pcgr_data <- collectPCGRSNVINDELData(dir = pcgr_dir, sheet_name = sheet_name)
+pcgr_data <- CollectPCGRSNVINDELData(dir = pcgr_dir, sheet_name = sheet_name)
 
 total_variants <- nrow(pcgr_data)
 message(paste("Total number of variants = ", total_variants))
@@ -80,7 +129,7 @@ message(paste("Total number of variants = ", total_variants))
 SaveData(
     pcgr_data, 
     dir = data_dir, 
-    filename = "dfsp_wes_pcgr_cohort_merged_tbl"
+    filename = "WES_PCGR_DFSP_cohort_merged_tbl"
 )
 
 ##"==========================================================================="
@@ -88,7 +137,7 @@ SaveData(
 ##"==========================================================================="
 pcgr_data <- LoadData(
     dir = data_dir, 
-    filename = "dfsp_wes_pcgr_cohort_merged_tbl"
+    filename = "WES_PCGR_DFSP_cohort_merged_tbl"
 )
 
 ## Explore the threshold values for filtering
@@ -154,11 +203,11 @@ final_variants <- filterPCGRData(
 # )
 
 ## Convert the PCGR data to a MAF format
-maf_tbl <- convertPCGRToMaftools(pcgr_tbl = final_variants) 
+maf_tbl <- ConvertPCGRToMaftools(pcgr_tbl = final_variants) 
 
 ## CNV facets data
 facet_dir <- "/mnt/f/projects/250224_sarcoma_multiomics/data/wes/cnv_facets"
-cnv_data <- collectCNVFacets(facet_dir = facet_dir)
+cnv_data <- CollectCNVFacets(facet_dir = facet_dir)
 
 ## Create a MAF object
 maf_obj <- read.maf(
@@ -173,7 +222,7 @@ maf_obj@variant.classification.summary
 SaveData(
     maf_obj, 
     dir = data_dir, 
-    filename = "dfsp_wes_pcgr_cohort_maf_obj"
+    filename = "WES_PCGR_DFSP_cohort_merged_maf_obj"
 )
 
 ## "========================================================================="
@@ -181,7 +230,7 @@ SaveData(
 ## "========================================================================="
 maf_obj <- LoadData(
     dir = data_dir, 
-    filename = "dfsp_wes_pcgr_cohort_maf_obj"
+    filename = "WES_PCGR_DFSP_cohort_merged_maf_obj"
 )
 
 ## Get the summary of mutated genes
@@ -195,14 +244,18 @@ message(
 )
 
 ## Mutated genes in the oncokb gene list
-oncokb_genes <- loadOncoKBGeneList()
+oncokb_genes <- LoadOncoKBGeneList()
 
 oncokb_genes_summary <- gene_summary |> 
     filter(Hugo_Symbol %in% oncokb_genes)
-message("Total number of genes in OncoKB gene list: ", nrow(oncokb_genes_summary))
+
+message(
+    "Total number of genes in OncoKB gene list: ", nrow(oncokb_genes_summary)
+)
 
 ## Top genes affected
 top_genes <- gene_summary |> head(20)
+
 message(
     "Top 20 genes affected by variants:",
     paste(top_genes$Hugo_Symbol, collapse = ", ")
@@ -236,7 +289,7 @@ mafbarplot(
 )
 
 ## Plot the summary of variants
-file <- here("figures/wes/dfsp_wes_pcgr_cohort_maf_summary.png")
+file <- here("figures/wes/pcgr/WES_DFSP_PCGR_cohort_maf_summary.png")
 png(
     file = file, width = 8, height = 6.5,
     type = "cairo", units = "in", res = 300
@@ -279,7 +332,7 @@ message(paste("Median number of mutations per tumour = ", variants_median))
 ## "==========================================================================="
 ## Estimate DFSP TMB  ----
 ## "==========================================================================="
-file <- here("figures/wes/dfsp_wes_pcgr_cohort_tmb.png")
+file <- here("figures/wes/pcgr/WES_PCGR_DFSP_cohort_tmb.png")
 png(
     file = file, width = 6, height = 5, 
     type = "cairo", units = "in", res = 300
@@ -303,10 +356,48 @@ message(
     )
 )
 
+tmb_data <- as_tibble(tmb_data)
+
+## Save the TMB data
+SaveData(
+    tmb_data, 
+    dir = data_dir, 
+    filename = "WES_PCGR_DFSP_cohort_tmb"
+)
+
+## "==========================================================================="
+## Compare TMB (Epic meth groups) ----
+## "==========================================================================="
+file <- here("data/clinical/phenoData_DFSP_allTumour_CNV_Meth.csv")
+meth_data <- read_csv(file = file, show_col_types = FALSE) |> 
+    select(Sample.ID, Meth.Subtype.Main.2Class) |> 
+    filter(!is.na(Meth.Subtype.Main.2Class))
+
+meth_data <- meth_data |> 
+    left_join(tmb_data, by = c("Sample.ID" = "Tumor_Sample_Barcode"))
+
+plot <- BoxPlotCompareGroups(
+    data = meth_data,
+    x = "Meth.Subtype.Main.2Class",
+    y = "total_perMB",
+    y_lab = "TMB/mb",
+    y_lim = NULL,
+    stat_method = "wilcox_test",
+    alternative = "two.sided"
+)
+
+SavePlot(
+    plot = plot,
+    width = 3.5,
+    height = 2.5,
+    dir = plot_dir,
+    filename = "WES_PCGR_DFSP_cohort_tmb_EPIC_Meth.Subtype.Main.2Class",
+)
+
 ## "==========================================================================="
 ## Compare TMB against TCGA cohort ----
 ## "==========================================================================="
-file <- here("figures/wes/dfsp_wes_pcgr_cohort_tmb_tcga_comparison.png")
+file <- here(plot_dir, "WES_DFSP_PCGR_cohort_tmb_tcga_comparison.png")
 png(
     file = file, width = 6, height = 4, 
     type = "cairo", units = "in", res = 300
@@ -328,6 +419,8 @@ plotVaf(
 ## "========================================================================="
 ## Compare TMB across groups ----
 ## "========================================================================="
+clinical_info <- LoadDFSPClinicalInfo()
+
 ## Group comparsions
 tmb_tbl <- tmb_data |> 
     left_join(clinical_info, by = c("Tumor_Sample_Barcode" = "Sample.ID"))
@@ -1060,3 +1153,153 @@ test <- gsea_res |>
     # filter(padj < 0.05) |>
     filter(pval < 0.05)
 view(test)
+
+## "==========================================================================="
+## Complextheatmap oncoplot ----
+## "==========================================================================="
+laml.maf = system.file("extdata", "tcga_laml.maf.gz", package = "maftools")
+laml.clin = system.file("extdata", "tcga_laml_annot.tsv", package = "maftools")
+laml = read.maf(maf = laml.maf, clinicalData = laml.clin)
+
+matrix <- oncoplot(
+    maf = laml,
+    top = 20,
+    writeMatrix = TRUE
+)
+
+# test <- mutCountMatrix(maf = laml)
+# test[1:3, 1:3]
+
+# class(test)
+
+# test <- test |> as_tibble(rownames = "Hugo_Symbol")
+
+# colnames(test)
+# view(test)
+
+matMut <- read.table("onco_matrix.txt", header = T, check.names = F, sep = "\t")
+matMut[1:3, 1:3]
+
+# Standardize mutation type names
+matMut[matMut == "In-frame"] = "In_frame"
+matMut[matMut == "Missense_Mutation"] = "Missense"
+matMut[matMut == "Nonsense_Mutation"] = "Truncating"
+matMut[matMut == "Frame_Shift_Del"] = "Truncating"
+matMut[matMut == "Frame_Shift_Ins"] = "Truncating"
+matMut[matMut == "In_Frame_Del"] = "In_frame"
+matMut[matMut == "In_Frame_Ins"] = "In_frame"
+matMut[matMut == "Splice_Site"] = "Truncating"
+
+matMuttmp = matMut
+matMuttmp$gene = row.names(matMuttmp)
+mat_long <- reshape2::melt(matMuttmp, id.vars = "gene", value.name = "Variant_Classification")
+levels(factor(mat_long$Variant_Classification))
+
+pdata <- getClinicalData(laml)
+pdata <- subset(pdata, pdata$Tumor_Sample_Barcode %in% colnames(matMut))
+pdata = as.data.frame(pdata)
+pdata$days_to_last_followup = ifelse(pdata$days_to_last_followup == "-Inf", 0, pdata$days_to_last_followup)
+# 画图并去除无突变的样本和基因
+pdata$days_to_last_followup = as.numeric(pdata$days_to_last_followup)
+pdata$FAB_classification = factor(pdata$FAB_classification)
+pdata$Overall_Survival_Status = factor(pdata$Overall_Survival_Status)
+str(pdata)
+## 'data.frame':	164 obs. of  4 variables:
+##  $ Tumor_Sample_Barcode   : chr  "TCGA-AB-2802" "TCGA-AB-2804" "TCGA-AB-2805" "TCGA-AB-2806" ...
+##  $ FAB_classification     : Factor w/ 8 levels "M0","M1","M2",..: 5 4 1 2 2 3 4 3 3 5 ...
+##  $ days_to_last_followup  : num  365 2557 577 945 181 ...
+##  $ Overall_Survival_Status: Factor w/ 2 levels "0","1": 2 1 2 2 2 1 2 2 2 2 ...
+
+# Update matMut to match pdata samples
+matMut <- matMut[, pdata$Tumor_Sample_Barcode]
+
+# Check what mutation types are actually present in the data
+print("Unique mutation types in matMut:")
+print(unique(as.vector(as.matrix(matMut[rowSums(matMut != "0") > 0, ]))))
+
+# Remove rows and columns with no mutations
+matMut_filtered <- matMut[rowSums(matMut != "0") > 0, colSums(matMut != "0") > 0]
+print(paste("Matrix dimensions after filtering:", nrow(matMut_filtered), "x", ncol(matMut_filtered)))
+
+# Filter pdata to match the filtered matrix samples
+pdata_filtered <- subset(pdata, pdata$Tumor_Sample_Barcode %in% colnames(matMut_filtered))
+
+alter_fun <- list(
+  background = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), 
+              gp = gpar(fill = "white", col = NA))
+  },
+  In_frame = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), 
+              gp = gpar(fill = col["In_frame"], col = NA))
+  },
+  Missense = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"),  
+              gp = gpar(fill = col["Missense"], col = NA))
+  },
+  Multi_Hit = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), 
+              gp = gpar(fill = col["Multi_Hit"], col = NA))
+  },
+  Truncating = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), 
+              gp = gpar(fill = col["Truncating"], col = NA))
+  }
+)
+
+heatmap_legend_param <- list(title = "Alternations", at = c("In_frame", "Missense",
+    "Truncating", "Multi_Hit"), labels = c("In_frame", "Missense", "Truncating",
+    "Multi_Hit"))
+
+# 指定颜色, 调整颜色代码即可
+col <- c(In_frame = "purple", Missense = "orange", Multi_Hit = "black", Truncating = "blue")
+# 定义注释信息 自定义颜色 连续性变量设置颜色（外）
+col_OS = colorRamp2(c(0, 973), c("white", "red"))
+
+ha <- HeatmapAnnotation(
+    OS = pdata_filtered$days_to_last_followup, 
+    Status = pdata_filtered$Overall_Survival_Status,
+    FAB_classification = pdata_filtered$FAB_classification, 
+    col = list(OS = col_OS), 
+    show_annotation_name = TRUE,
+    annotation_name_gp = gpar(fontsize = 7)
+)
+
+column_title <- "This is Oncoplot "
+
+# Use the filtered matrix for oncoPrint
+oncoPrint(matMut_filtered, alter_fun = alter_fun, col = col, 
+          alter_fun_is_vectorized = FALSE,
+          top_annotation = ha,
+          column_title = column_title)
+
+oncoPrint(matMut_filtered,
+    bottom_annotation = ha, # 注释信息在底部
+    #   top_annotation=top_annotation,
+    # right_annotation=NULL,
+    alter_fun = alter_fun,
+    col = col,
+    column_title = column_title,
+    heatmap_legend_param = heatmap_legend_param,
+    row_names_side = "left",
+    pct_side = "right",
+    # column_order=sample_order,
+    #       column_split=3
+    alter_fun_is_vectorized = FALSE
+)
+
+oncoplot_anno <- oncoPrint(matMut_filtered,
+    bottom_annotation = ha, # 注释信息在底部
+    #   top_annotation=top_annotation,
+    # right_annotation=NULL,
+    alter_fun = alter_fun,
+    col = col,
+    column_title = "",
+    heatmap_legend_param = heatmap_legend_param,
+    row_names_side = "left",
+    pct_side = "right",
+    # column_order=sample_order,
+    #       column_split=3
+    alter_fun_is_vectorized = FALSE
+)
+draw(oncoplot_anno, annotation_legend_side = "left", )

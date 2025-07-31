@@ -22,8 +22,8 @@ export PROJECT_DIR
 export MODULE_DIR="${PROJECT_DIR}/scripts/modules"
 
 # Input and output directories
-export INPUT_DIR="${1:-${PROJECT_DIR}/data/test_data/Raw}"
-export OUTPUT_DIR="${2:-${PROJECT_DIR}/data/test_data}"
+export INPUT_DIR="${1:-${PROJECT_DIR}/data/wes/Raw}"
+export OUTPUT_DIR="${2:-${PROJECT_DIR}/data/wes}"
 
 mkdir -p "$OUTPUT_DIR" 
 

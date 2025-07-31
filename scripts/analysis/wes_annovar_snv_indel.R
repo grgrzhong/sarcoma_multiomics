@@ -4,7 +4,7 @@ library(maftools)
 source(here::here("scripts/lib/study_lib.R"))
 
 ## Merge all the annovar annoated variants -------------
-data_dir <- "data/wes/Processed"
+data_dir <- "data/processed"
 figure_dir <- "figures/wes"
 
 ## "=========================================================================="
