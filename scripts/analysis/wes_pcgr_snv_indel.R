@@ -27,7 +27,7 @@ plot_dir <- "figures/wes/pcgr"
 capture_size <- 34 
 
 ## Clinical information
-clinical_info <- LoadDFSPClinicalInfo()
+clinical_info <- LoadClinicalInfo()
 
 ## "==========================================================================="
 ## Collect PCGR CNV data --------------
@@ -419,7 +419,7 @@ plotVaf(
 ## "========================================================================="
 ## Compare TMB across groups ----
 ## "========================================================================="
-clinical_info <- LoadDFSPClinicalInfo()
+clinical_info <- LoadClinicalInfo()
 
 ## Group comparsions
 tmb_tbl <- tmb_data |> 

@@ -27,7 +27,7 @@ plot_dir <- "figures/wes/pcgr"
 capture_size <- 34 
 
 ## Clinical information
-clinical_info <- LoadDFSPClinicalInfo()
+clinical_info <- LoadClinicalInfo()
 
 ## "==========================================================================="
 ## Collect PCGR CNV data --------------
@@ -36,56 +36,479 @@ clinical_info <- LoadDFSPClinicalInfo()
 pcgr_dir <- "data/wes/PCGR"
 pcgr_cna_raw <- CollectPCGRCNAData(dir = pcgr_dir)
 
-## Define the cnv status based on total copy number
-pcgr_cna_dat <- pcgr_cna_raw |> 
-    mutate(
-        cn_status = case_when(
-            # Homozygous deletion (complete loss)
-            total_cn == 0 ~ "homdel",
+unique(pcgr_cna_raw$event_type)
+unique(pcgr_cna_raw$variant_class)
 
-            # Heterozygous loss (one copy lost)
-            total_cn == 1 ~ "hetloss",
-            
-            # Copy-neutral Loss of Heterozygosity (cnLOH)
-            # Total CN = 2 but allelic imbalance (e.g., 2+0, not 1+1)
-            total_cn == 2 & cn_minor == 0 ~ "cnloh",
-
-            # Normal diploid (balanced)
-            total_cn == 2 & cn_major == 1 & cn_minor == 1 ~ "neutral",
-
-            # Low-level gain (3-4 copies)
-            total_cn %in% 3:4 ~ "gain",
-
-            # High-level amplification (more than 4 copies)
-            total_cn > 4 ~ "amp",
-
-            # Other cases (e.g., undefined)
-            TRUE ~ "undefined"
-        ),
-        .after = total_cn
-    ) |>  
-    mutate(
-        variant_class = case_when(
-            total_cn == 0 ~ "del",
-            total_cn >= 4 ~ "amp",
-            TRUE ~ "undefined"
-        )
-    ) |> 
-    relocate(variant_class, .after = cn_status)
-
-## We should use the total cohort size as the denominator for frequency calculations
-## as we are answer the question "What proportion of samples have this alteration in my cohort?"
-total_cohort_size <- length(unique(pcgr_cna_dat$sample_id))
-
-message(
-    paste("Total samples with PCGR CNV data:", total_cohort_size)
+## Save the raw PCGR CNV data
+SaveData(
+    pcgr_cna_raw, 
+    dir = "data/processed", 
+    filename = "wes_pcgr_DFSP_cohort_cnv_raw_data"
 )
 
-## Analyze only the variants that are satify the thresholds
-pcgr_cna_tbl <- pcgr_cna_dat |> 
-    filter(total_cn == 0 | total_cn >= 4)
+## "==========================================================================="
+## Preprocess PCGR CNV data --------------
+## "==========================================================================="
+## Load the PCGR annotated CNV data
+pcgr_cna_raw <- LoadData(
+    dir = "data/processed", 
+    filename = "wes_pcgr_DFSP_cohort_cnv_raw_data"
+)
 
-length(unique(pcgr_cna_tbl$sample_id))
+## Load the CNV facets data
+cnv_facet_raw <- LoadData(
+    dir = "data/processed",
+    filename = "wes_cnv_facets_DFSP_cohort_raw"
+)
+
+## 5 samples do not have estimated purity
+## DFSP-042-T, DFSP-060-T, DFSP-331-T, DFSP-341-T, DFSP-354-T
+cnv_facet_raw |> 
+    filter(is.na(purity) | is.na(ploidy)) |> 
+    select(sample, purity, ploidy) |> 
+    distinct()
+
+## Define the CNV events
+## 10.1016/j.jtho.2021.02.023
+pcgr_cna_tbl <- pcgr_cna_raw |> 
+    separate_wider_delim(
+            var_id, 
+            delim = ":", 
+            names = c(
+                "CHROM", "position_range", "cn_major_parsed", "cn_minor_parsed"
+            ),
+            cols_remove = FALSE
+    ) |> 
+    select(-cn_major_parsed, -cn_minor_parsed) |>
+    separate_wider_delim(
+        position_range, 
+        names = c("POS", "END"), 
+        delim = "-", 
+        cols_remove = FALSE
+    ) |> 
+    left_join(
+        cnv_facet_raw |> 
+            select(sample, CHROM, POS, END, SVTYPE, ploidy, purity),
+        by = c("sample_id" = "sample", "CHROM", "POS", "END")
+    ) |> 
+    select(-CHROM, -POS, -END) |>
+    mutate(
+        ploidy = as.numeric(ploidy),
+        purity = as.numeric(purity)
+    ) |> 
+    rename(
+        facet_svtype = SVTYPE,
+        facet_ploidy = ploidy,
+        facet_purity = purity
+    ) |> 
+    relocate(
+        matches("facet"), .after = variant_class
+        # facet_svtype, facet_ploidy, facet_purity, 
+    ) |> 
+    ## Define the CNV events
+    mutate(
+        cn_status = case_when(
+            !is.na(facet_ploidy) & total_cn == 0 ~ "Deep deletion",
+            
+            !is.na(facet_ploidy) & (total_cn -facet_ploidy) <= -1 ~ "Deletion",
+            
+            !is.na(facet_ploidy) & 
+                ((total_cn -facet_ploidy) > -1) &
+                ((total_cn -facet_ploidy) < 1) ~ "Neutral",
+            
+            !is.na(facet_ploidy) & 
+                ((total_cn - facet_ploidy) >= 1) &
+                ((total_cn - facet_ploidy) < 3) ~ "Amplification",
+
+            !is.na(facet_ploidy) & (total_cn - facet_ploidy) >=3 ~ "Deep amplification",
+        ),
+        .after = variant_class
+    ) |> 
+    arrange(desc(facet_ploidy)) 
+
+## Keep only changed CNV events
+pcgr_cna_tbl <- pcgr_cna_tbl |> filter(cn_status != "Neutral")
+
+SaveData(
+    pcgr_cna_tbl,
+    dir = "data/processed",
+    filename = "wes_pcgr_DFSP_cohort_cnv_filtered"
+)
+## "========================================================================="
+## Differentially mutated and shared regions across groups
+## "========================================================================="
+data <- pcgr_cna_tbl  |> 
+    left_join(
+        clinical_info |> select(Sample.ID, FST.Group),
+        by = c("sample_id" = "Sample.ID")
+    ) |> 
+    relocate(FST.Group, .after = sample_id)
+
+## Get the significantly different cytobands across groups
+all_diff_cytoands <- map_dfr(
+    group_comparisons,
+    function(comp) {
+        GetPCGRCNVGroupDiffCytoband(
+            data = data,
+            var = "FST.Group",
+            cn_column = "cn_status",
+            event_type = NULL,
+            somatic_matched = TRUE,
+            group1 = comp$group1,
+            group2 = comp$group2,
+            p_adjust_method = "fdr",
+            min_altered_samples = 3,
+            group_comparison = comp$name
+        )
+    }
+)
+
+sig_diff_cytobands <- all_diff_cytoands |> 
+    filter(fisher_p < 0.05) |>
+    mutate(cytoband_alteration = paste0(cytoband, "_", cn_status)) |> 
+    group_by(cytoband_alteration, cytoband, cn_status) |> 
+    summarise(
+        n_comparisons_present = n(),
+        comparisons_present = paste(group_comparison, collapse = ", "),
+        mean_genes_affected = mean(n_genes_affected, na.rm = TRUE),
+        mean_segment_size = mean(mean_segment_size, na.rm = TRUE),
+        .groups = "drop"
+    ) |> 
+    arrange(desc(n_comparisons_present))
+
+## Get the shared cytobands across groups
+shared_cytobands <- GetPCGRCNVGroupShareCytoband(
+    data,
+    var = "FST.Group",
+    cn_column = "cn_status",
+    event_type = NULL,
+    somatic_matched = TRUE,
+    min_freq_per_group = 0.3,
+    min_groups_present = 1
+)
+
+show_cytobands <- shared_cytobands$shared_cytobands |> 
+    select(cytoband_alteration, cytoband, cn_status) |> 
+    bind_rows(
+        sig_diff_cytobands |> 
+        select(cytoband_alteration, cytoband, cn_status)
+    ) |> 
+    distinct()
+
+## Calculate the frequency of show cytobands
+cytoband_freq <- pcgr_cna_tbl  |> 
+    left_join(
+        clinical_info |> select(Sample.ID, Somatic.Status),
+        by = c("sample_id" = "Sample.ID")
+    ) |> 
+    filter(Somatic.Status %in% c("Matched")) |> 
+    select(sample_id, cytoband, cn_status) |> 
+    distinct() |> 
+    filter(cytoband  %in% show_cytobands$cytoband) |> 
+    group_by(cytoband) |> 
+    summarise(
+        alter_samples = n(),
+        alter_freq = alter_samples / total_cohort_size,
+        .groups = "drop"
+    ) |> 
+    arrange(desc(alter_freq))
+
+## Prepare the oncoplot data
+cytoband_oncoplot_data <- pcgr_cna_tbl  |> 
+    left_join(
+        clinical_info |> select(Sample.ID, Somatic.Status),
+        by = c("sample_id" = "Sample.ID")
+    ) |> 
+    filter(Somatic.Status %in% c("Matched")) |> 
+    select(sample_id, cytoband, cn_status) |>
+    distinct() |>
+    mutate(
+        alteration = case_when(
+            cn_status == "Deep deletion" ~ "HOMDEL",
+            cn_status == "Deletion" ~ "DEL",
+            cn_status == "Amplification" ~ "GAIN",
+            cn_status == "Deep amplification" ~ "AMP",
+            TRUE ~ cn_status
+        )
+    ) |> 
+    group_by(sample_id, cytoband) |>
+    summarise(
+        alterations = paste(unique(alteration), collapse = ";"),
+        .groups = "drop"
+    ) |> 
+    arrange(desc(alterations)) |> 
+    mutate(
+        final_alteration = case_when(
+            ## Count number of different alteration types (split by semicolon)
+            str_count(alterations, ";") >= 1 ~ "Multi",  # Multiple different alterations
+            ## Single alterations
+            alterations == "HOMDEL" ~ "HOMDEL",
+            alterations == "DEL" ~ "DEL", 
+            alterations == "GAIN" ~ "GAIN",
+            alterations == "AMP" ~ "AMP",
+            TRUE ~ alterations
+        )
+    ) |> 
+    select(-alterations) |> 
+    distinct()
+
+onco_matrix <- expand_grid(
+    sample_id = all_samples$sample_id,
+    cytoband = show_cytobands$cytoband
+) |> 
+    left_join(cytoband_oncoplot_data, by = c("sample_id", "cytoband")) |> 
+    mutate(
+        final_alteration = if_else(
+            is.na(final_alteration), "", final_alteration
+        )
+    ) |> 
+    ## Handle duplicates by keeping distinct combinations
+    distinct(sample_id, cytoband, .keep_all = TRUE) |>
+    pivot_wider(
+        names_from = sample_id,
+        values_from = final_alteration,
+        values_fill = ""
+    ) |>
+    column_to_rownames("cytoband") |>
+    as.matrix()
+
+## Plot the oncoplot
+GenerateCytobandOncoplot(
+    mat = onco_matrix,
+    sample_annotation = c("FST.Group", "Metastasis"),
+    sample_sorted_by = NULL,
+    sample_sorted_level = c(
+        "U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP"
+    ),
+    width = 18,
+    height = 12,
+    dir = "figures/oncoplot",
+    filename = "wes_cnvfacets_pcgr_oncoplot_somatic_matched"
+)
+
+
+## "========================================================================="
+## Differentially mutated and shared genes across groups
+## "========================================================================="
+data <- pcgr_cna_tbl  |> 
+    left_join(
+        clinical_info |> select(Sample.ID, FST.Group),
+        by = c("sample_id" = "Sample.ID")
+    ) |> 
+    relocate(FST.Group, .after = sample_id)
+
+gene_stat <- GetPCGRCNVGroupStatRes(
+    data = data,
+    var = "FST.Group",
+    cn_column = "cn_status",
+    event_type = NULL,
+    somatic_matched = TRUE,
+    group1 = "U-DFSP",
+    group2 = "FS-DFSP",
+    p_adjust_method = "fdr",
+    group_comparison = "U-DFSP_vs_FS-DFSP"
+)
+
+gene_stat |> 
+    filter(significantly_different)
+
+length(unique(gene_stat$symbol))
+
+## Perform all pairwise comparisons
+
+## Get all differentially mutated genes across groups
+all_diff_genes <- map_dfr(
+    comparisons,
+    function(comp) {
+        GetPCGRCNVGroupStatRes(
+            data = data,
+            var = "FST.Group",
+            cn_column = "cn_status",
+            event_type = NULL,
+            somatic_matched = TRUE,
+            group1 = comp$group1,
+            group2 = comp$group2,
+            p_adjust_method = "fdr",
+            group_comparison = comp$name
+        )
+    }
+)
+
+## Filter for significant results
+sig_diff_genes <- all_diff_genes |>
+    filter(
+        fisher_q < 0.5,           # FDR < 10%
+        abs(freq_diff) >= 0.2,    # At least 20% frequency difference
+        total_altered >= 3         # At least 3 total alterations
+    ) |>
+    arrange(fisher_q, desc(abs(freq_diff)))
+
+share_genes <- GetPCGRCNVGroupShareGene(
+    data,
+    var = "FST.Group",
+    cn_column = "cn_status",
+    event_type = NULL,
+    somatic_matched = TRUE,
+    min_freq_per_group = 0.3,
+    min_groups_present = 2
+)
+
+## Get a list of genes from the shared and differentiall mutated
+cnv_oncoplot_genes <- unique(
+    c(sig_diff_genes$symbol, share_genes$symbol)
+)
+
+## Remove the genes without gene name annotation
+cnv_oncoplot_genes <- cnv_oncoplot_genes[!grepl("ENSG", cnv_oncoplot_genes)]
+
+## Public sarcoma genes
+file <- here("data/public/cBioPortal_sarcoma_CNA_Genes.txt")
+col_names <- c(
+    "symbol", 
+    "gistic_q_value",
+    "cytoband",
+    "cn_status",
+    "profiled_samples",
+    "#",
+    "freq",
+    "is_oncoKB"
+)
+public_sarcoma_cna_data <- read_tsv(file, show_col_types = FALSE)
+colnames(public_sarcoma_cna_data) <- col_names
+unique(public_sarcoma_cna_data$cn_status)
+public_sarcoma_cna_genes  <- public_sarcoma_cna_data |> 
+    mutate(freq = str_replace(freq, "%", "")) |>
+    mutate(freq = as.numeric(freq)) |> 
+    arrange(desc(freq)) |> 
+    # filter(freq >= 10) |> 
+    pull(symbol)
+
+cnv_oncoplot_genes[cnv_oncoplot_genes %in% public_sarcoma_cna_genes]
+
+total_cohort_size <- clinical_info |> 
+    filter(Somatic.Status == "Matched") |> 
+    nrow()
+
+## genes freq data in entire cohort
+data |>
+    filter(symbol %in% cnv_oncoplot_genes)
+
+
+oncoplot_data <- data |>
+    filter(symbol %in% cnv_oncoplot_genes) |>
+    select(sample_id, symbol, cn_status, FST.Group) |>
+    ## Simplify cn_status for plotting
+    mutate(
+        alteration = case_when(
+            cn_status == "Deep deletion" ~ "HOMDEL",
+            cn_status == "Deletion" ~ "DEL",
+            cn_status %in% c("Amplification", "Deep amplification") ~ "AMP",
+            TRUE ~ cn_status
+        )
+    ) |>
+    ## Handle multiple alterations per gene per sample
+    group_by(sample_id, symbol, FST.Group) |>
+    summarise(
+        alterations = paste(unique(alteration), collapse = ";"),
+        .groups = "drop"
+    ) |>
+    mutate(
+        final_alteration = case_when(
+            str_detect(alterations, "AMP") & str_detect(alterations, "DEL") ~ "Multi",
+            str_detect(alterations, "AMP") ~ "AMP",
+            str_detect(alterations, "DEL") ~ "DEL",
+            TRUE ~ alterations
+        )
+    ) |>
+    select(sample_id, symbol, final_alteration)
+
+all_samples <- clinical_info |>
+    filter(Somatic.Status == "Matched") |>
+    select(Sample.ID, FST.Group) |>
+    rename(sample_id = Sample.ID)
+
+complete_combinations <- expand_grid(
+    sample_id = all_samples$sample_id,
+    symbol = cnv_oncoplot_genes
+) |>
+    left_join(oncoplot_data, by = c("sample_id", "symbol")) |>
+    mutate(
+        final_alteration = if_else(is.na(final_alteration), "", final_alteration)
+    )
+
+onco_matrix <- complete_combinations |>
+    pivot_wider(
+        names_from = sample_id,
+        values_from = final_alteration,
+        values_fill = ""
+    ) |>
+    column_to_rownames("symbol") |>
+    as.matrix()
+
+dim(onco_matrix)
+mat <- onco_matrix[1:20, ]
+
+sample_annotations <- all_samples |>
+    arrange(FST.Group) |>
+    column_to_rownames("sample_id")
+
+## Define colors
+alter_colors <- c(
+    "AMP" = "#E31A1C",      # Red for amplifications
+    "DEL" = "#1F78B4"      # Blue for deletions
+    # "" = "white"            # White for no alteration
+)
+
+alter_fun <- list(
+    "AMP" = function(x, y, w, h) {
+        grid.rect(x, y, w*0.9, h*0.9, gp = gpar(fill = alter_colors[["AMP"]], col = NA))
+    },
+    "DEL" = function(x, y, w, h) {
+        grid.rect(x, y, w*0.9, h*0.9, gp = gpar(fill = alter_colors[["DEL"]], col = NA))
+    },
+    "background" = function(x, y, w, h) {
+        grid.rect(x, y, w, h, gp = gpar(fill = "white", col = "grey90"))
+    }
+)
+
+col_anno <- HeatmapAnnotation(
+    FST_Group = sample_annotations$FST.Group,
+    col = list(FST_Group = study_colors$FST.Group),
+    annotation_name_side = "left",
+    annotation_legend_param = list(
+        FST_Group = list(title = "FST Group", title_position = "topleft")
+    ),
+    show_annotation_name = TRUE
+)
+
+oncoPrint(
+    mat,
+    alter_fun = alter_fun,
+    col = alter_colors,
+    
+    ## Order is already set in matrix
+    row_order = NULL,
+    column_order = NULL,
+    
+    ## Annotations
+    top_annotation = col_anno,
+    # right_annotation = right_anno,
+    
+    ## Gene names
+    row_names_side = "left",
+    row_names_gp = gpar(fontsize = 8),
+    
+    ## Remove sample names for cleaner look
+    show_column_names = FALSE,
+    
+    ## Title
+    column_title = paste0("PCGR CNV Oncoplot - DFSP Cohort (n=", total_cohort_size, " samples, ", nrow(onco_matrix), " genes)"),
+    column_title_gp = gpar(fontsize = 12, fontface = "bold"),
+    
+    ## Show percentage
+    show_pct = TRUE,
+    pct_side = "right"
+)
 
 ## "==========================================================================="
 ## Find significantly altered cytobands ----

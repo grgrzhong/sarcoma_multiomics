@@ -632,7 +632,7 @@ addCancerHotspot <- function(
     return(maf_hotspot)
 }
 
-loadCancerHotspot <- function(
+LoadCancerHotspot <- function(
     hotspot = NULL,                # path to the hotspot file
     qvalue = NULL,                 # qvalue threshold
     median_allele_freq_rank = NULL, # median Allele Frequency Rank threshold 
@@ -1153,7 +1153,7 @@ FilterAnnovarData <- function(data) {
         filter(!(cosmic70 %in% c(".")))
 
     ## Cancer hotspot
-    snv_hotspots <- loadCancerHotspot()[["snv_hotspots"]]
+    snv_hotspots <- LoadCancerHotspot()[["snv_hotspots"]]
 
     dfsp_snv_hotsopts <- first_inclusion_snv |>
         mutate(match_change = paste0(Hugo_Symbol, "_", aaChange)) |>
@@ -1462,7 +1462,7 @@ loadDFSPGroupInfo <- function() {
 addDFSPGroupInfo <- function(maf_tbl) {
 
     ## Load the sample group info
-    clinical_info <- LoadDFSPClinicalInfo()
+    clinical_info <- LoadClinicalInfo()
 
     group_info <- clinical_info |> 
         dplyr::select(Sample.ID, FST.Group) |> 
@@ -1503,7 +1503,7 @@ CollectPCGRCNAData <- function(
     ## Loop through the files and read the data
     for (file in pcgr_files) {
 
-        message("Processing file: ", file)
+        message(" - Processing file: ", file)
         
         if (!file.exists(file)) {
             warning("File does not exist: ", file)
@@ -1958,7 +1958,7 @@ ConvertPCGRToMaftools <- function(pcgr_tbl) {
 
 }
 
-LoadDFSPClinicalInfo <- function() {
+LoadClinicalInfo <- function() {
 
     file <- "data/clinical/DFSP_WES_clinical.csv"
 
@@ -1968,14 +1968,14 @@ LoadDFSPClinicalInfo <- function() {
         )
     
     # unique(clinical_info$FST.Group)
-    clinical_info <- clinical_info |> 
-        mutate(
-            FST.Group =factor(
-                FST.Group, 
-                levels = c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP")
-                # ordered = TRUE
-            )
-        )
+    # clinical_info <- clinical_info |> 
+    #     mutate(
+    #         FST.Group =factor(
+    #             FST.Group, 
+    #             levels = c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP")
+    #             # ordered = TRUE
+    #         )
+    #     )
     
     clinical_info
 }
@@ -2142,7 +2142,7 @@ LoadDFSPSampleGroups <- function() {
 LoadSampleGroupInfo <- function(is_somatic_matched = FALSE) {
 
     ## Load the clinical info
-    clinical_info <- LoadDFSPClinicalInfo()
+    clinical_info <- LoadClinicalInfo()
 
     if (is_somatic_matched) {
         
@@ -2161,12 +2161,17 @@ LoadSampleGroupInfo <- function(is_somatic_matched = FALSE) {
     ## "-----------------------------------------------------------------"
     all_tumors <- clinical_info |> pull(Sample.ID)
 
+    num_all_tumors <- length(all_tumors)
+
     ## "-----------------------------------------------------------------"
     ## Overall FST group
     ## "-----------------------------------------------------------------"
     FST <- clinical_info |> filter(FST == "Yes") |> pull(Sample.ID)
 
     `Non-FST` <- clinical_info |> filter(FST == "No") |> pull(Sample.ID)
+
+    num_FST <- length(FST)
+    num_Non_FST <- length(`Non-FST`)
 
     ## "-----------------------------------------------------------------"
     ## Overall Metastasis group
@@ -2179,6 +2184,9 @@ LoadSampleGroupInfo <- function(is_somatic_matched = FALSE) {
 
     `Non-Meta` <- clinical_info |> filter(Metastasis == "No") |> pull(Sample.ID)
 
+    num_Meta <- length(Meta)
+    num_Non_Meta <- length(`Non-Meta`)
+
     ## "-----------------------------------------------------------------"
     ## FST.subgroup
     ## "-----------------------------------------------------------------"
@@ -2188,20 +2196,28 @@ LoadSampleGroupInfo <- function(is_somatic_matched = FALSE) {
         filter(FST.Group %in% c("U-DFSP")) |> 
         pull(Sample.ID)
     
+    num_U_DFSP <- length(`U-DFSP`)
+
     ## Pre-FST, EPIC=40, WES=45
     `Pre-FST` = clinical_info |> 
         filter(FST.Group %in% c("Pre-FST")) |> 
         pull(Sample.ID)
 
+    num_Pre_FST <- length(`Pre-FST`)
+
     ## Post-FST, EPIC=39, WES=41
     `Post-FST` = clinical_info |> 
         filter(FST.Group %in% c("Post-FST")) |> 
         pull(Sample.ID)
+    
+    num_Post_FST <- length(`Post-FST`)
 
     ## FS-DFSP group, EPIC=23, WES=23
     `FS-DFSP` = clinical_info |> 
         filter(FST.Group %in% c("FS-DFSP")) |> 
         pull(Sample.ID)
+    
+    num_FS_DFSP <- length(`FS-DFSP`)
 
     ## "-----------------------------------------------------------------"
     ## FS-DFSP subgroup
@@ -2211,12 +2227,16 @@ LoadSampleGroupInfo <- function(is_somatic_matched = FALSE) {
         filter(FST.Group %in% c("FS-DFSP")) |> 
         filter(Metastasis == "Yes") |> 
         pull(Sample.ID)
+    
+    num_FS_DFSP_Meta <- length(`FS-DFSP_Meta`)
 
     ## FS-DFSP Primary Rrecurrence, EPIC=17, WES=17
     `FS-DFSP_Pri_Rec` = clinical_info |> 
         filter(FST.Group %in% c("FS-DFSP")) |>
         filter(Specimen.Nature %in% c("Primary", "Recurrence")) |> 
         pull(Sample.ID)
+    
+    num_FS_DFSP_Pri_Rec <- length(`FS-DFSP_Pri_Rec`)
 
     ## "-----------------------------------------------------------------"
     ## Comparsion groups
@@ -2224,36 +2244,76 @@ LoadSampleGroupInfo <- function(is_somatic_matched = FALSE) {
     `Non-Meta_vs_Meta` <- c(`Non-Meta`, Meta)
     `Non-FST_vs_FST` <- c(`Non-FST`, FST)
     `U-DFSP_vs_Pre-FST` <- c(`U-DFSP`, `Pre-FST`)
+    `U-DFSP_vs_Post-FST` <- c(`U-DFSP`, `Post-FST`)
+    `U-DFSP_vs_FS-DFSP` <- c(`U-DFSP`, `FS-DFSP`)
     `Pre-FST_vs_Post-FST` <- c(`Pre-FST`, `Post-FST`)
+    `Pre-FST_vs_FS-DFSP` <- c(`Pre-FST`, `FS-DFSP`)
     `Post-FST_vs_FS-DFSP` <- c(`Post-FST`, `FS-DFSP`)
-    `FS-DFSP_Pri_Rec_vs_FS-DFSP_Meta` <- c(
-        `FS-DFSP_Pri_Rec`, `FS-DFSP_Meta`
+    `U-DFSP+Pre-FST_vs_Post-FST+FS-DFSP` <- c(
+        `U-DFSP`, `Pre-FST`, `Post-FST`, `FS-DFSP`
     )
+    `FS-DFSP_Pri_Rec_vs_FS-DFSP_Meta` <- c(`FS-DFSP_Pri_Rec`, `FS-DFSP_Meta`)
 
     # return
-    list(
+    sample_group_list <- list(
         ## single groups
-        "all_tumors" = all_tumors,
-        "FST" = FST,
-        "Non-FST" = `Non-FST`,
-        "Meta" = Meta,
-        "Non-Meta" = `Non-Meta`,
-        "U-DFSP" = `U-DFSP`,
-        "Pre-FST" = `Pre-FST`,
-        "Post-FST" = `Post-FST`,
-        "FS-DFSP" = `FS-DFSP`,
-        "FS-DFSP_Pri_Rec" = `FS-DFSP_Pri_Rec`,
-        "FS-DFSP_Meta" = `FS-DFSP_Meta`,
-
-        ## comparsion groups
-        "Non-Meta_vs_Meta" = `Non-Meta_vs_Meta`,
-        "Non-FST_vs_FST" = `Non-FST_vs_FST`,
-        "U-DFSP_vs_Pre-FST" = `U-DFSP_vs_Pre-FST`,
-        "Pre-FST_vs_Post-FST" = `Pre-FST_vs_Post-FST`,
-        "Post-FST_vs_FS-DFSP" = `Post-FST_vs_FS-DFSP`,
-        "FS-DFSP_Pri_Rec_vs_FS-DFSP_Meta" = `FS-DFSP_Pri_Rec_vs_FS-DFSP_Meta`
+        groups = list(
+            "all_tumors" = all_tumors,
+            "FST" = FST,
+            "Non-FST" = `Non-FST`,
+            "Meta" = Meta,
+            "Non-Meta" = `Non-Meta`,
+            "U-DFSP" = `U-DFSP`,
+            "Pre-FST" = `Pre-FST`,
+            "Post-FST" = `Post-FST`,
+            "FS-DFSP" = `FS-DFSP`,
+            "FS-DFSP_Pri_Rec" = `FS-DFSP_Pri_Rec`,
+            "FS-DFSP_Meta" = `FS-DFSP_Meta`
+        )
     )
 
+    ## Add the comparison groups to the list
+    sample_group_list[["comparisons"]][[
+        paste0("U-DFSP(", num_U_DFSP, ")_vs_Pre-FST(", num_Pre_FST, ")")
+    ]] <- `U-DFSP_vs_Pre-FST`
+    
+    sample_group_list[["comparisons"]][[
+        paste0("U-DFSP(", num_U_DFSP, ")_vs_Post-FST(", num_Post_FST, ")")
+    ]] <- `U-DFSP_vs_Post-FST`
+    
+    sample_group_list[["comparisons"]][[
+        paste0("U-DFSP(", num_U_DFSP, ")_vs_FS-DFSP(", num_FS_DFSP, ")")
+    ]] <- `U-DFSP_vs_FS-DFSP`
+
+    sample_group_list[["comparisons"]][[
+        paste0("Pre-FST(", num_Pre_FST, ")_vs_Post-FST(", num_Post_FST, ")")
+    ]] <- `Pre-FST_vs_Post-FST`
+    
+    sample_group_list[["comparisons"]][[
+        paste0("Pre-FST(", num_Pre_FST, ")_vs_FS-DFSP(", num_FS_DFSP, ")")
+    ]] <- `Pre-FST_vs_FS-DFSP`
+
+    sample_group_list[["comparisons"]][[
+        paste0("Post-FST(", num_Post_FST, ")_vs_FS-DFSP(", num_FS_DFSP, ")")
+    ]] <- `Post-FST_vs_FS-DFSP`
+
+    sample_group_list[["comparisons"]][[
+        paste0(
+            "FS-DFSP_Pri_Rec(", num_FS_DFSP_Pri_Rec, 
+            ")_vs_FS-DFSP_Meta(", num_FS_DFSP_Meta, ")"
+        )
+    ]] <- `FS-DFSP_Pri_Rec_vs_FS-DFSP_Meta`
+
+    sample_group_list[["comparisons"]][[
+        paste0("Non-Meta(", num_Non_Meta, ")_vs_Meta(", num_Meta, ")")
+    ]] <- `Non-Meta_vs_Meta`
+
+    sample_group_list[["comparisons"]][[
+        paste0("Non-FST(", num_Non_FST, ")_vs_FST(", num_FST, ")")
+    ]] <- `Non-FST_vs_FST`
+
+    ## return
+    sample_group_list
 }
 
 loadMsigdbGeneSet <- function() {
@@ -2405,7 +2465,7 @@ CollectCNVFacets <- function(facet_dir) {
 getDFSPSampleGroups <- function(sample_ids) {
 
     ## Load clinical info
-    clinical_info <- LoadDFSPClinicalInfo()
+    clinical_info <- LoadClinicalInfo()
 
     ## Get the sample groups for the given sample IDs
     sample_idx <- match(sample_ids, clinical_info$Sample.ID)
@@ -3196,20 +3256,14 @@ GetGistic2CytobandStatRes <- function(
 ) {
 
     ## Load GISTIC data in maftools objects
-    g1_obj <- readGistic(
-        gisticAllLesionsFile = here(gistic_dir, group1, "all_lesions.conf_99.txt"),
-        gisticAmpGenesFile = here(gistic_dir, group1, "amp_genes.conf_99.txt"),
-        gisticDelGenesFile = here(gistic_dir, group1, "del_genes.conf_99.txt"),
-        gisticScoresFile = here(gistic_dir, group1, "scores.gistic"),
-        verbose = FALSE
+    g1_obj <- LoadGistic2Data(
+        gistic_dir = gistic_dir,
+        group = group1
     )
 
-    g2_obj <- readGistic(
-        gisticAllLesionsFile = here(gistic_dir, group2, "all_lesions.conf_99.txt"),
-        gisticAmpGenesFile = here(gistic_dir, group2, "amp_genes.conf_99.txt"),
-        gisticDelGenesFile = here(gistic_dir, group2, "del_genes.conf_99.txt"),
-        gisticScoresFile = here(gistic_dir, group2, "scores.gistic"),
-        verbose = FALSE
+    g2_obj <- LoadGistic2Data(
+        gistic_dir = gistic_dir,
+        group = group2
     )
 
     # head(g1_obj@data)
@@ -3222,8 +3276,8 @@ GetGistic2CytobandStatRes <- function(
     g1_total_samples <- length(getSampleSummary(g1_obj)$Tumor_Sample_Barcode)
     g2_total_samples <- length(getSampleSummary(g2_obj)$Tumor_Sample_Barcode)
 
-    message(paste("Group 1 (", group1, ") samples:", g1_total_samples))
-    message(paste("Group 2 (", group2, ") samples:", g2_total_samples))
+    message(paste(" - Group 1 (", group1, ") samples:", g1_total_samples))
+    message(paste(" - Group 2 (", group2, ") samples:", g2_total_samples))
 
     ## "==================================================================="
     ## Cytoband-level comparison ----
@@ -3748,7 +3802,7 @@ PlotGisticGroupComparsion <- function(
         is_somatic_matched = is_somatic_matched
     )
 
-    dir_create(here(plot_dir))
+    dir_create(plot_dir)
 
     ## plot the chromosomal plots
     for (img in c("png", "pdf")) {
@@ -3762,7 +3816,7 @@ PlotGisticGroupComparsion <- function(
             )
         } else {
             CairoPDF(
-                file = file, width = width, height = height, fonts = "Arial"
+                file = file, width = width, height = height, family  = "Arial"
             )
         }
 
@@ -3816,5 +3870,861 @@ PlotGisticGroupComparsion <- function(
         message(paste0("Saving combined plot: ", file))
         dev.off()
     }
+
+}
+
+GenerateCytobandOncoplot <- function(
+    mat,
+    sample_annotation = c("FST.Group", "Metastasis"),
+    sample_sorted_by = "FST.Group",
+    sample_sorted_level = c(
+        "U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP"
+    ),
+    width = 18,
+    height = 12,
+    dir = "figures/oncoplot",
+    filename = "oncoplot"
+) {
+    ## Convert the matrix to a tibble
+    data <- as_tibble(mat, rownames = "cytoband") |> 
+        mutate(across(everything(), as.character)) |> 
+        pivot_longer(
+            cols = -cytoband, 
+            names_to = "Sample.ID", 
+            values_to = "alteration"
+        ) |> 
+        distinct() |> 
+        mutate(
+            alteration = if_else(
+                alteration == "", NA_character_, alteration
+            )
+        ) |> 
+        filter(!is.na(alteration))
+    
+
+    ## Get matched clinical info
+    clinical_info <- LoadClinicalInfo()
+    
+    sample_idx <- match(
+        colnames(mat), 
+        clinical_info$Sample.ID
+    )
+    
+    ## Sort samples
+    if (!is.null(sample_sorted_by) && !is.null(sample_sorted_level)) {
+
+        # data |> 
+        #     left_join(
+        #         clinical_info  |> select(Sample.ID, all_of(sample_sorted_by)), 
+        #         by = "Sample.ID"
+        #     ) |>
+        #     group_by(FST.Group)
+        #     arrange()
+
+        sample_order <- clinical_info[sample_idx, ] |> 
+            # group_by(across(all_of(sample_sorted_by))) |>
+            mutate(
+                sample_order = factor(
+                    !!sym(sample_sorted_by), 
+                    levels = sample_sorted_level
+                )
+            ) |>
+            group_by(sample_order) |>
+            arrange(!!sym(sample_sorted_by), Sample.ID, .by_group = TRUE) |> 
+            select(Sample.ID, all_of(sample_sorted_by), sample_order) |> 
+            pull(Sample.ID)
+
+    } else {
+
+        ## Sort by patient
+        sample_order <- colnames(mat)
+    }
+
+    sort_mat <- mat[, sample_order]
+
+    ## Alteration colors
+    data <- as_tibble(sort_mat, rownames = "cytoband") |> 
+        mutate(across(everything(), as.character)) |> 
+        pivot_longer(
+            cols = -cytoband, 
+            names_to = "Sample.ID", 
+            values_to = "alteration"
+        ) |> 
+        distinct() |> 
+        mutate(
+            alteration = if_else(
+                alteration == "", NA_character_, alteration
+            )
+        ) |> 
+        filter(!is.na(alteration))
+    
+    ## Sample annotations
+    sort_sample_idx <- match(
+        sample_order, 
+        clinical_info$Sample.ID
+    )
+
+    sample_annotation_df <- clinical_info[sort_sample_idx, ] |> 
+        select(Sample.ID, all_of(sample_annotation)) |> 
+        column_to_rownames("Sample.ID")
+
+    ## Define colors for the sample annotations
+    sample_annotation_colors <- list()
+
+    for (annotation in sample_annotation) {
+        sample_annotation_colors[[annotation]] <- study_colors[[annotation]]
+    }
+
+    ## Create the matrix annotation colors
+    alterations <- data |> pull(alteration) |> unique() |> sort()
+
+    ## Get the matched alteration colors
+    alteration_colors <- c()
+    
+    for (i in alterations) {
+        alteration_colors <- c(alteration_colors, study_colors$cna_class[i])
+    }
+
+    alter_fun <- list(
+        background = alter_graphic("rect", fill = "#CCCCCC"),
+        homdel = alter_graphic("rect", fill = alteration_colors[["homdel"]]),
+        hetdel = alter_graphic("rect", fill = alteration_colors[["hetdel"]]),
+        gain = alter_graphic("rect", fill = alteration_colors[["gain"]])
+    )
+
+    ## Plot the oncoprint
+    oncoplot <- oncoPrint(
+        sort_mat,
+        alter_fun = alter_fun,
+        col = alteration_colors,
+        
+        bottom_annotation = HeatmapAnnotation(
+            df = sample_annotation_df,
+            col = sample_annotation_colors,
+            annotation_height = unit(c(5, 5), "mm"),
+            annotation_name_gp = gpar(fontsize = 8)
+        ),
+
+        show_pct = TRUE,
+        pct_digits = 0,
+        pct_side = "right",
+
+        show_row_names = TRUE,
+        row_names_side = "left",
+        row_names_gp = gpar(fontsize = 6),
+        # row_title = "Cytobands (Most Frequent → Least Frequent)",
+
+        column_title = "Significant altered cytobands",
+        show_column_names = TRUE,
+        column_names_gp = gpar(fontsize = 6),
+        
+        column_order = sample_order,
+        # Add frequency annotation on the right
+        # right_annotation = rowAnnotation(
+        #     Frequency = anno_barplot(
+        #         cytoband_freq$alteration_frequency[
+        #             match(rownames(oncoplot_matrix_sorted), cytoband_freq$matched_cytoband)
+        #         ],
+        #         bar_width = 1,
+        #         gp = gpar(fill = "#666666"),
+        #         axis_param = list(side = "bottom", labels_rot = 0)
+        #     ),
+        #     annotation_width = unit(2, "cm")
+        # ),
+        
+        heatmap_legend_param = list(
+            title = "CNV Alteration",
+            labels = c(
+                "Homozygous Deletion", 
+                "Heterozygous Deletion", 
+                "Gain", 
+                "No Alteration"
+            )
+        )
+    )
+
+    ## Save the oncoplot
+    file <- here(dir, paste0(filename, ".pdf"))
+    pdf(file, width = width, height = height)
+
+    draw(
+        oncoplot,
+        heatmap_legend_side = "right",
+        annotation_legend_side = "right",
+        merge_legends = TRUE,
+        padding = unit(c(1, 1, 1, 1), "cm")
+    )
+
+    dev.off()
+
+    message(
+        paste0("Saved oncoplot: ", file)
+    )
+
+}
+
+LoadGistic2Data <- function(
+    gistic_dir,
+    group
+) {
+    
+    ## Load GISTIC data in maftools objects
+    gistic_obj <- readGistic(
+        gisticAllLesionsFile = here(gistic_dir, group, "all_lesions.conf_99.txt"),
+        gisticAmpGenesFile = here(gistic_dir, group, "amp_genes.conf_99.txt"),
+        gisticDelGenesFile = here(gistic_dir, group, "del_genes.conf_99.txt"),
+        gisticScoresFile = here(gistic_dir, group, "scores.gistic"),
+        verbose = FALSE
+    )
+
+    ## Get sample counts for proper frequency calculation
+    # total_samples <- length(getSampleSummary(gistic_obj)$Tumor_Sample_Barcode)
+
+    # message(paste(" - Group (", group, ") samples:", total_samples))
+
+    ## Return
+    gistic_obj
+}
+
+GetPCGRCNVGroupDiffGene <- function(
+    data,
+    var = "FST.Group",
+    cn_column = "cn_status",
+    event_type = NULL,
+    somatic_matched = TRUE,
+    group1 = "U-DFSP",
+    group2 = "FS-DFSP",
+    p_adjust_method = "BH",
+    group_comparison = "U-DFSP_vs_FS-DFSP"
+) {
+
+    ## Filter by event type
+    if (!is.null(event_type)) {
+        data <- data |> 
+            filter(event_type %in% {{event_type}})
+    }
+
+    ## We should use the total cohort size as the denominator for frequency calculations
+    ## as we are answer the question "What proportion of samples have this alteration in my cohort?"
+    clinical_info <- LoadClinicalInfo()
+    
+    if (somatic_matched) {
+
+        sample_ids <- clinical_info |> 
+            filter(Somatic.Status == "Matched") |> 
+            pull(Sample.ID)
+        
+        total_sample <- length(sample_ids)
+
+    } else {
+
+        sample_ids <- clinical_info |> 
+            pull(Sample.ID)
+
+        total_sample <- length(sample_ids)
+
+    }
+
+    message(paste(" - Total samples:", total_sample))
+
+    data <- data |> filter(sample_id %in% sample_ids)
+
+    ## Get samples in each group
+    group1_samples <- data |> 
+        filter(!!sym(var) %in% group1) |> 
+        pull(sample_id) |> 
+        unique()
+
+    group2_samples <- data |> 
+        filter(!!sym(var) %in% group2) |> 
+        pull(sample_id) |> 
+        unique()
+
+    message(paste(" - Group 1 samples:", length(group1_samples)))
+    message(paste(" - Group 2 samples:", length(group2_samples)))
+    
+    ## Calculate gene alteration frequencies
+    gene_stats <- data |>
+        filter(!!sym(var) %in% c(group1, group2)) |> 
+        group_by(symbol, !!sym(cn_column)) |> 
+        summarise(
+            group1_altered = sum(sample_id %in% group1_samples),
+            group1_total = length(group1_samples),
+            group2_altered = sum(sample_id %in% group2_samples),
+            group2_total = length(group2_samples),
+            total_altered = n_distinct(sample_id),
+            .groups = "drop"
+        ) |> 
+        ## Calculate frequencies
+        mutate(
+            group1_freq = group1_altered / group1_total,
+            group2_freq = group2_altered / group2_total,
+            freq_diff = group2_freq - group1_freq
+        ) |> 
+        ## Filter genes with sufficient alterations
+        dplyr::filter(
+            total_altered >=3, # At least 3 total alterations
+            (group1_altered >=2 | group2_altered >=2)
+        ) |> 
+        ## Perform Fisher's exact test
+        rowwise() |>
+        mutate(
+            fisher_p = {
+                contingency_table <- matrix(
+                    c(
+                        group1_altered, group1_total - group1_altered,
+                        group2_altered, group2_total - group2_altered
+                    ),
+                    nrow = 2,
+                    byrow = TRUE
+                )
+                colnames(contingency_table) <- c("Altered", "Not_Altered")
+                rownames(contingency_table) <- c("Group1", "Group2")
+                fisher.test(contingency_table)$p.value
+            },
+            fisher_adds_ratio = {
+                contingency_table <- matrix(
+                    c(
+                        group1_altered, group1_total - group1_altered,
+                        group2_altered, group2_total - group2_altered
+                    ),
+                    nrow = 2,
+                    byrow = TRUE
+                )
+                colnames(contingency_table) <- c("Altered", "Not_Altered")
+                rownames(contingency_table) <- c("Group1", "Group2")
+                fisher.test(contingency_table)$estimate
+            }
+        ) |> 
+        ungroup() |> 
+        ## Add FDR correction
+        mutate(
+            fisher_q = p.adjust(fisher_p, method = p_adjust_method),
+            significantly_different = fisher_q < 0.05,
+            enriched_in_group2 = fisher_q < 0.05 & 
+                fisher_adds_ratio > 1 & freq_diff > 0,
+            depleted_in_group2 = fisher_q < 0.05 & 
+                fisher_adds_ratio < 1 & freq_diff < 0
+        ) |> 
+        arrange(fisher_q, desc(abs(freq_diff)))
+    
+    ## Return
+    gene_stats |> 
+        mutate(group_comparison = {{group_comparison}})
+}
+
+GetPCGRCNVGroupShareGene <- function(
+    data,
+    var = "FST.Group",
+    cn_column = "cn_status",
+    event_type = NULL,
+    somatic_matched = TRUE,
+    min_freq_per_group = 0.3,
+    min_groups_present = 2
+) {
+
+    ## Filter by event type
+    if (!is.null(event_type)) {
+        data <- data |> 
+            filter(event_type %in% {{event_type}})
+    }
+
+    ## We should use the total cohort size as the denominator for frequency calculations
+    ## as we are answer the question "What proportion of samples have this alteration in my cohort?"
+    clinical_info <- LoadClinicalInfo()
+    
+    if (somatic_matched) {
+
+        sample_ids <- clinical_info |> 
+            filter(Somatic.Status == "Matched") |> 
+            pull(Sample.ID)
+        
+        total_sample <- length(sample_ids)
+
+    } else {
+
+        sample_ids <- clinical_info |> 
+            pull(Sample.ID)
+
+        total_sample <- length(sample_ids)
+
+    }
+
+    message(paste(" - Total samples:", total_sample))
+
+    data <- data |> filter(sample_id %in% sample_ids)
+
+    ## Calculate gene frequencies
+    gene_group_freq <- data |>
+        group_by(symbol, !!sym(var), !!sym(cn_column)) |>
+        summarise(
+            n_samples_altered = n_distinct(sample_id),
+            .groups = "drop"
+        ) |>
+        ## add total samples per group
+        left_join(
+            data |>
+            group_by(!!sym(var)) |>
+            summarise(
+                total_samples = n_distinct(sample_id),
+                .groups = "drop"
+            ),
+            by = var
+        ) |> 
+        mutate(
+            freq = n_samples_altered / total_samples,
+            gene_alteration = paste0(symbol, "_", !!sym(cn_column))
+        ) |> 
+        filter(freq >= min_freq_per_group)
+
+    ## identify genes present in multiple groups
+    shared_genes <- gene_group_freq |> 
+        group_by(gene_alteration, symbol, !!sym(cn_column)) |>
+        summarise(
+            n_groups_present = n(),
+            groups_present = paste(!!sym(var), collapse = ", "),
+            mean_freq = mean(freq),
+            min_freq = min(freq),
+            max_freq = max(freq),
+            range_freq = max_freq - min_freq,
+            .groups = "drop"
+        ) |> 
+        filter(n_groups_present >= min_groups_present) |> 
+        arrange(desc(n_groups_present), desc(mean_freq)) 
+
+    summary <- shared_genes |> 
+        left_join(
+            gene_group_freq,
+            by = c("gene_alteration", "symbol", cn_column)
+        )
+
+    summary
+}
+
+GetPCGRCNVGroupDiffCytoband <- function(
+    data,
+    var = "FST.Group",
+    cn_column = "cn_status",
+    event_type = NULL,
+    somatic_matched = TRUE,
+    group1 = "U-DFSP",
+    group2 = "FS-DFSP",
+    p_adjust_method = "BH",
+    min_altered_samples = 3,
+    group_comparison = "U-DFSP_vs_FS-DFSP"
+) {
+
+    ## Filter by event type
+    if (!is.null(event_type)) {
+        data <- data |> 
+            filter(event_type %in% {{event_type}})
+    }
+
+    ## We should use the total cohort size as the denominator for frequency calculations
+    ## as we are answer the question "What proportion of samples have this alteration in my cohort?"
+    clinical_info <- LoadClinicalInfo()
+    
+    if (somatic_matched) {
+
+        sample_ids <- clinical_info |> 
+            filter(Somatic.Status == "Matched") |> 
+            pull(Sample.ID)
+        
+        total_sample <- length(sample_ids)
+
+    } else {
+
+        sample_ids <- clinical_info |> 
+            pull(Sample.ID)
+
+        total_sample <- length(sample_ids)
+
+    }
+
+    message(paste(" - Total samples:", total_sample))
+
+    data <- data |> filter(sample_id %in% sample_ids)
+
+    ## Get samples in each group
+    group1_samples <- data |> 
+        filter(!!sym(var) %in% group1) |> 
+        pull(sample_id) |> 
+        unique()
+
+    group2_samples <- data |> 
+        filter(!!sym(var) %in% group2) |> 
+        pull(sample_id) |> 
+        unique()
+
+    message(paste(" - Group 1 samples:", length(group1_samples)))
+    message(paste(" - Group 2 samples:", length(group2_samples)))
+    
+    ## Calculate alteration frequencies
+    data |>
+        filter(!!sym(var) %in% c(group1, group2)) |> 
+        distinct(sample_id, cytoband, !!sym(cn_column), !!sym(var)) |> 
+        group_by(cytoband, !!sym(cn_column)) |> 
+        summarise(
+            group1_altered = sum(sample_id %in% group1_samples),
+            group1_total = length(group1_samples),
+            group2_altered = sum(sample_id %in% group2_samples),
+            group2_total = length(group2_samples),
+            total_altered = n_distinct(sample_id),
+            .groups = "drop"
+        ) |> 
+        ## Add back summary statistics
+        left_join(
+            data |> 
+                filter(!!sym(var) %in% c(group1, group2)) |> 
+                group_by(cytoband, !!sym(cn_column)) |>
+                summarise(
+                    mean_segment_size = mean(segment_length_mb, na.rm = TRUE),
+                    n_genes_affected = n_distinct(symbol),
+                    .groups = "drop"
+                ),
+            by = c("cytoband", cn_column)
+        ) |> 
+        ## Calculate frequencies
+        mutate(
+            group1_freq = group1_altered / group1_total,
+            group2_freq = group2_altered / group2_total,
+            freq_diff = group2_freq - group1_freq
+        ) |> 
+        ## Filter genes with sufficient alterations
+        dplyr::filter(
+            total_altered >= min_altered_samples,
+            (group1_altered >= min_altered_samples | group2_altered >= min_altered_samples)
+        ) |> 
+        ## Perform Fisher's exact test
+        rowwise() |>
+        mutate(
+            fisher_p = {
+                contingency_table <- matrix(
+                    c(
+                        group1_altered, group1_total - group1_altered,
+                        group2_altered, group2_total - group2_altered
+                    ),
+                    nrow = 2,
+                    byrow = TRUE
+                )
+                colnames(contingency_table) <- c("Altered", "Not_Altered")
+                rownames(contingency_table) <- c("Group1", "Group2")
+                fisher.test(contingency_table)$p.value
+            },
+            fisher_adds_ratio = {
+                contingency_table <- matrix(
+                    c(
+                        group1_altered, group1_total - group1_altered,
+                        group2_altered, group2_total - group2_altered
+                    ),
+                    nrow = 2,
+                    byrow = TRUE
+                )
+                colnames(contingency_table) <- c("Altered", "Not_Altered")
+                rownames(contingency_table) <- c("Group1", "Group2")
+                fisher.test(contingency_table)$estimate
+            }
+        ) |> 
+        ungroup() |> 
+        ## Adjust for multiple testing
+        mutate(
+            fisher_q = p.adjust(fisher_p, method = p_adjust_method),
+            significantly_different = fisher_q < 0.05,
+            enriched_in_group2 = fisher_q < 0.05 & 
+                fisher_adds_ratio > 1 & freq_diff > 0,
+            depleted_in_group2 = fisher_q < 0.05 & 
+                fisher_adds_ratio < 1 & freq_diff < 0
+        ) |> 
+        arrange(fisher_q, desc(abs(freq_diff))) |> 
+        mutate(
+            group_comparison = {{group_comparison}},
+            .before = "cytoband"
+        )
+}
+
+GetPCGRCNVGroupShareCytoband <- function(
+    data,
+    var = "FST.Group",
+    cn_column = "cn_status",
+    event_type = NULL,
+    somatic_matched = TRUE,
+    min_freq_per_group = 0.3,
+    min_groups_present = 1
+) {
+
+    ## Filter by event type
+    if (!is.null(event_type)) {
+        data <- data |> 
+            filter(event_type %in% {{event_type}})
+    }
+
+    ## We should use the total cohort size as the denominator for frequency calculations
+    ## as we are answer the question "What proportion of samples have this alteration in my cohort?"
+    clinical_info <- LoadClinicalInfo()
+    
+    if (somatic_matched) {
+
+        sample_ids <- clinical_info |> 
+            filter(Somatic.Status == "Matched") |> 
+            pull(Sample.ID)
+        
+        total_sample <- length(sample_ids)
+
+    } else {
+
+        sample_ids <- clinical_info |> 
+            pull(Sample.ID)
+
+        total_sample <- length(sample_ids)
+
+    }
+
+    message(paste(" - Total samples:", total_sample))
+
+    data <- data |> filter(sample_id %in% sample_ids)
+
+    ## Calculate gene frequencies
+    cytoband_group_freq <- data |>
+        distinct(sample_id, cytoband, !!sym(cn_column), !!sym(var)) |>
+        group_by(cytoband, !!sym(var), !!sym(cn_column)) |>
+        summarise(
+            n_samples_altered = n_distinct(sample_id),
+            .groups = "drop"
+        ) |>
+        ## add total samples per group
+        left_join(
+            data |>
+            group_by(!!sym(var)) |>
+            summarise(
+                total_samples = n_distinct(sample_id),
+                .groups = "drop"
+            ),
+            by = var
+        ) |> 
+        mutate(
+            freq = n_samples_altered / total_samples,
+            cytoband_alteration = paste0(cytoband, "_", !!sym(cn_column))
+        ) |> 
+        filter(freq >= min_freq_per_group)
+
+    ## identify genes present in multiple groups
+    shared_cytobands <- cytoband_group_freq |> 
+        group_by(cytoband_alteration, cytoband, !!sym(cn_column)) |>
+        summarise(
+            n_groups_present = n(),
+            groups_present = paste(!!sym(var), collapse = ", "),
+            mean_freq = mean(freq),
+            min_freq = min(freq),
+            max_freq = max(freq),
+            range_freq = max_freq - min_freq,
+            .groups = "drop"
+        ) |> 
+        filter(n_groups_present >= min_groups_present) |> 
+        arrange(desc(n_groups_present), desc(mean_freq)) 
+
+    summary <- shared_cytobands |> 
+        left_join(
+            cytoband_group_freq |>
+                select(cytoband_alteration, !!sym(var), n_samples_altered, total_samples, freq),
+            by = "cytoband_alteration"
+        ) |>
+        arrange(desc(n_groups_present), desc(mean_freq), cytoband_alteration, !!sym(var))
+    
+    ## Return
+    list(
+        summary = summary,
+        shared_cytobands = shared_cytobands
+    )
+}
+
+GenerateCytobandOncoplot <- function(
+    mat,
+    sample_annotation = c("FST.Group", "Metastasis"),
+    sample_sorted_by = "FST.Group",
+    sample_sorted_level = c(
+        "U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP"
+    ),
+    width = 18,
+    height = 12,
+    dir = "figures/oncoplot",
+    filename = "oncoplot"
+) {
+    ## Convert the matrix to a tibble
+    data <- as_tibble(mat, rownames = "cytoband") |> 
+        mutate(across(everything(), as.character)) |> 
+        pivot_longer(
+            cols = -cytoband, 
+            names_to = "Sample.ID", 
+            values_to = "alteration"
+        ) |> 
+        distinct() |> 
+        mutate(
+            alteration = if_else(
+                alteration == "", NA_character_, alteration
+            )
+        ) |> 
+        filter(!is.na(alteration))    
+
+    ## Get matched clinical info
+    clinical_info <- LoadClinicalInfo()
+    
+    sample_idx <- match(
+        colnames(mat), 
+        clinical_info$Sample.ID
+    )
+    
+    ## Sort samples
+    if (!is.null(sample_sorted_by) && !is.null(sample_sorted_level)) {
+
+        # data |> 
+        #     left_join(
+        #         clinical_info  |> select(Sample.ID, all_of(sample_sorted_by)), 
+        #         by = "Sample.ID"
+        #     ) |>
+        #     group_by(FST.Group)
+        #     arrange()
+
+        sample_order <- clinical_info[sample_idx, ] |> 
+            # group_by(across(all_of(sample_sorted_by))) |>
+            mutate(
+                sample_order = factor(
+                    !!sym(sample_sorted_by), 
+                    levels = sample_sorted_level
+                )
+            ) |>
+            group_by(sample_order) |>
+            arrange(!!sym(sample_sorted_by), Sample.ID, .by_group = TRUE) |> 
+            select(Sample.ID, all_of(sample_sorted_by), sample_order) |> 
+            pull(Sample.ID)
+
+    } else {
+
+        ## Sort by patient
+        sample_order <- colnames(mat)
+    }
+
+    sort_mat <- mat[, sample_order]
+
+    ## Alteration colors
+    data <- as_tibble(sort_mat, rownames = "cytoband") |> 
+        mutate(across(everything(), as.character)) |> 
+        pivot_longer(
+            cols = -cytoband, 
+            names_to = "Sample.ID", 
+            values_to = "alteration"
+        ) |> 
+        distinct() |> 
+        mutate(
+            alteration = if_else(
+                alteration == "", NA_character_, alteration
+            )
+        ) |> 
+        filter(!is.na(alteration))
+    
+    ## Sample annotations
+    sort_sample_idx <- match(
+        sample_order, 
+        clinical_info$Sample.ID
+    )
+
+    sample_annotation_df <- clinical_info[sort_sample_idx, ] |> 
+        select(Sample.ID, all_of(sample_annotation)) |> 
+        column_to_rownames("Sample.ID")
+
+    ## Define colors for the sample annotations
+    sample_annotation_colors <- list()
+
+    for (annotation in sample_annotation) {
+        sample_annotation_colors[[annotation]] <- study_colors[[annotation]]
+    }
+
+    ## Create the matrix annotation colors
+    alterations <- data |> pull(alteration) |> unique() |> sort()
+
+    ## Get the matched alteration colors
+    alteration_colors <- c()
+    
+    for (i in alterations) {
+        alteration_colors <- c(alteration_colors, study_colors$cna_class[i])
+    }
+
+    alter_fun <- list(
+        background = alter_graphic("rect", fill = "#CCCCCC"),
+        HOMDEL = alter_graphic("rect", fill = alteration_colors[["HOMDEL"]]),
+        DEL = alter_graphic("rect", fill = alteration_colors[["DEL"]]),
+        GAIN = alter_graphic("rect", fill = alteration_colors[["GAIN"]]),
+        AMP = alter_graphic("rect", fill = alteration_colors[["AMP"]]),
+        Multi = alter_graphic("rect", fill = alteration_colors[["Multi"]])
+    )
+
+    ## Plot the oncoprint
+    oncoplot <- oncoPrint(
+        sort_mat,
+        alter_fun = alter_fun,
+        col = alteration_colors,
+        
+        bottom_annotation = HeatmapAnnotation(
+            df = sample_annotation_df,
+            col = sample_annotation_colors,
+            annotation_height = unit(c(5, 5), "mm"),
+            annotation_name_gp = gpar(fontsize = 8)
+        ),
+
+        show_pct = TRUE,
+        pct_digits = 0,
+        pct_side = "right",
+
+        show_row_names = TRUE,
+        row_names_side = "left",
+        row_names_gp = gpar(fontsize = 6),
+        # row_title = "Cytobands (Most Frequent → Least Frequent)",
+
+        column_title = "Significant altered cytobands",
+        show_column_names = TRUE,
+        column_names_gp = gpar(fontsize = 6),
+        
+        column_order = sample_order,
+        # Add frequency annotation on the right
+        # right_annotation = rowAnnotation(
+        #     Frequency = anno_barplot(
+        #         cytoband_freq$alteration_frequency[
+        #             match(rownames(oncoplot_matrix_sorted), cytoband_freq$matched_cytoband)
+        #         ],
+        #         bar_width = 1,
+        #         gp = gpar(fill = "#666666"),
+        #         axis_param = list(side = "bottom", labels_rot = 0)
+        #     ),
+        #     annotation_width = unit(2, "cm")
+        # ),
+        
+        heatmap_legend_param = list(
+            title = "CNV Alteration"
+            # labels = c(
+            #     "Homozygous Deletion", 
+            #     "Heterozygous Deletion", 
+            #     "Gain", 
+            #     "No Alteration"
+            # )
+        )
+    )
+
+    ## Save the oncoplot
+    dir_create(here(dir))
+    file <- here(dir, paste0(filename, ".pdf"))
+    pdf(file, width = width, height = height)
+
+    draw(
+        oncoplot,
+        heatmap_legend_side = "right",
+        annotation_legend_side = "right",
+        merge_legends = TRUE,
+        padding = unit(c(1, 1, 1, 1), "cm")
+    )
+
+    dev.off()
+
+    message(
+        paste0("Saved oncoplot: ", file)
+    )
 
 }

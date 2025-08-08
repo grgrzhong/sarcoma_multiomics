@@ -4,8 +4,8 @@
 ## Author:  Zhong Guorui
 ## Created: 2025-06-12
 ## Updated: 2025-06-12
-## Description: Converts a segment TSV file (e.g., from FACETS VCF-to-TSV conversion)
-##              to a custom TSV format with Chromosome, Start, End, nMajor, nMinor.
+## Description: Converts a segment TSV file for PCGR input.
+## to a custom TSV format with Chromosome, Start, End, nMajor, nMinor.
 ##############################################################################
 
 # Load required libraries
