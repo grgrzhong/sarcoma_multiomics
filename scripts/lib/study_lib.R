@@ -4544,6 +4544,7 @@ GenerateCytobandOncoplot <- function(
     sample_sorted_level = c(
         "U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP"
     ),
+    column_title = NULL,
     width = 18,
     height = 12,
     dir = "figures/oncoplot",
@@ -4654,7 +4655,7 @@ GenerateCytobandOncoplot <- function(
         DEL = alter_graphic("rect", fill = alteration_colors[["DEL"]]),
         GAIN = alter_graphic("rect", fill = alteration_colors[["GAIN"]]),
         AMP = alter_graphic("rect", fill = alteration_colors[["AMP"]]),
-        Multi = alter_graphic("rect", fill = alteration_colors[["Multi"]])
+        MULTI = alter_graphic("rect", fill = alteration_colors[["MULTI"]])
     )
 
     ## Plot the oncoprint
@@ -4679,7 +4680,7 @@ GenerateCytobandOncoplot <- function(
         row_names_gp = gpar(fontsize = 6),
         # row_title = "Cytobands (Most Frequent → Least Frequent)",
 
-        column_title = "Significant altered cytobands",
+        column_title = column_title,
         show_column_names = TRUE,
         column_names_gp = gpar(fontsize = 6),
         
@@ -4710,21 +4711,327 @@ GenerateCytobandOncoplot <- function(
 
     ## Save the oncoplot
     dir_create(here(dir))
-    file <- here(dir, paste0(filename, ".pdf"))
-    pdf(file, width = width, height = height)
+    img_type <- c(".pdf", ".png")
+    
+    for (img in img_type) {
+        
+        file <- here(dir, paste0(filename, img))
+        
+        if (img == ".pdf") {
+            pdf(file, width = width, height = height)
+    
+        } else if (img == ".png") {
+    
+            png(file, width = width, height = height, res = 300, units = "in")
+        }
+        
+        draw(
+            oncoplot,
+            heatmap_legend_side = "right",
+            annotation_legend_side = "right",
+            merge_legends = TRUE,
+            padding = unit(c(1, 1, 1, 1), "cm")
+        )
 
-    draw(
-        oncoplot,
-        heatmap_legend_side = "right",
-        annotation_legend_side = "right",
-        merge_legends = TRUE,
-        padding = unit(c(1, 1, 1, 1), "cm")
+        dev.off()
+
+        message(
+            paste0("Saved oncoplot: ", file)
+        )
+    }
+    # file <- here(dir, paste0(filename, ".pdf"))
+    # pdf(file, width = width, height = height)
+
+    # draw(
+    #     oncoplot,
+    #     heatmap_legend_side = "right",
+    #     annotation_legend_side = "right",
+    #     merge_legends = TRUE,
+    #     padding = unit(c(1, 1, 1, 1), "cm")
+    # )
+
+    # dev.off()
+
+    # message(
+    #     paste0("Saved oncoplot: ", file)
+    # )
+
+}
+
+GenerateGisticChromPlot <- function(
+    gistic_dir,
+    y_lim = NULL,
+    y_break_n = 6,
+    x_lim = NULL,
+    x_expand = c(0.02, 0),
+    title = NULL,
+    x_lab = NULL,
+    y_lab = "G-Score",
+    show_horizontal_grid = TRUE,
+    show_vertical_grid = TRUE,
+    grid_line_type = "dotted",
+    grid_line_color = "grey80",
+    grid_line_alpha = 1,
+    grid_line_width = 0.5,
+    show_chromosome_ideogram = TRUE,
+    ideogram_label_size = 4,
+    rel_heights = c(4, 0.3)
+) {
+    
+    ## Get the chromosome information
+    df <- data.frame(
+        chromName = seqnames(BSgenome.Hsapiens.UCSC.hg38), 
+        chromlength = seqlengths(BSgenome.Hsapiens.UCSC.hg38)
     )
 
-    dev.off()
+    ## Keep only chromsome 1-22
+    df <- df[1:22, ] |> as_tibble()
 
-    message(
-        paste0("Saved oncoplot: ", file)
-    )
+    df$chromName <- str_remove(df$chromName, "chr")
 
+    ## make all chromosome coordinate are start from 0
+    df$chromlengthCumsum <- cumsum(as.numeric(df$chromlength))
+    df$chormStartPosFrom0 <- c(0, df$chromlengthCumsum[-nrow(df)])
+
+    ## Calculate the middle coordinate for each chromosome
+    tmp_middle <- diff(c(0, df$chromlengthCumsum)) / 2
+    df$chromMidelePosFrom0 <- df$chormStartPosFrom0 + tmp_middle
+
+    ## Load the gistic score
+    file <- here(gistic_dir, "scores.gistic")
+    scores <- read.table(
+        file = file,
+        header = TRUE,
+        sep = "\t",
+        stringsAsFactors = FALSE
+    ) |> as_tibble()
+
+    ## Use the start of coordinate as the Amp or Del
+    chromID <- scores$Chromosome
+    scores$StartPos <- scores$Start + df$chormStartPosFrom0[chromID]
+    scores$EndPos <- scores$End + df$chormStartPosFrom0[chromID]
+
+    ## Convert the to Del to be negative
+    scores[scores$Type == "Del", "G.score"] <- scores[scores$Type == "Del", "G.score"] * -1
+
+    ## Determine y-axis limits if not provided
+    if (is.null(y_lim)) {
+        y_range <- range(scores$G.score, na.rm = TRUE)
+        y_padding <- diff(y_range) * 0.1
+        y_lim <- c(y_range[1] - y_padding, y_range[2] + y_padding)
+    }
+    
+    # ## Create chromosome ideogram data
+    # if (show_chromosome_ideogram) {
+    #     # Create alternating colors for chromosomes
+    #     df$fill_color <- rep(
+    #         c("black", "white"), 
+    #         length.out = nrow(df)
+    #     )
+        
+    #     if (is.null(ideogram_y_position)) {
+    #         # Default positions if not provided
+    #         ideogram_y_top <- y_lim[1] - 0.15 * diff(y_lim)
+    #         ideogram_y_bottom <- y_lim[1] - 0.2 * diff(y_lim)
+    #     } else {
+    #         # Use provided vector: c(top, bottom)
+    #         ideogram_y_top <- ideogram_y_position[1]
+    #         ideogram_y_bottom <- ideogram_y_position[2]
+    #     }
+        
+    #     # Create ideogram rectangles
+    #     ideogram_data <- df |>
+    #         mutate(
+    #             xmin = chormStartPosFrom0,
+    #             xmax = chromlengthCumsum,
+    #             ymin = ideogram_y_top,
+    #             ymax = ideogram_y_bottom
+    #         )
+        
+    #     # Calculate label positions - middle of ideogram top and bottom
+    #     df$label_y <- (ideogram_y_top + ideogram_y_bottom) / 2
+
+    #     # Set label colors based on rectangle colors (opposite colors for contrast)
+    #     df$label_color <- ifelse(
+    #         df$fill_color == "black", "white", "black"
+    #     )
+    # }
+    
+    ## Create the base plot
+    plot <- ggplot(scores, aes(StartPos, G.score)) +
+        geom_area(
+            aes(group = Type, fill = factor(Type, levels = c("Del", "Amp")))
+        ) +
+        scale_fill_lancet(
+            guide = guide_legend(reverse = TRUE), name = "Type"
+        )
+    
+    ## Add the horizontal grid lines
+    if (show_horizontal_grid) {
+        
+        y_breaks <- pretty(y_lim, n = y_break_n)
+        
+        plot <- plot +
+            geom_hline(
+                yintercept = y_breaks, 
+                linetype = grid_line_type, 
+                color = grid_line_color, 
+                alpha = grid_line_alpha,
+                size = grid_line_width
+            )
+    }
+
+    ## Add vertical chromosome separator lines
+    if (show_vertical_grid) {
+
+        # Create vertical lines at chromosome boundaries (excluding the first position and last)
+        chromosome_boundaries <- c(
+            0,
+            df$chromlengthCumsum[-length(df$chromlengthCumsum)]
+        )
+        
+        plot <- plot +
+            geom_vline(
+                xintercept = chromosome_boundaries,
+                linetype = grid_line_type, 
+                color = grid_line_color, 
+                alpha = grid_line_alpha,
+                size = grid_line_width
+            )  
+    }
+
+    ## main plot
+    plot <- plot +
+        scale_x_continuous(
+            expand = x_expand, 
+            limits = c(0, max(df$chromlengthCumsum)), 
+            name = x_lab, 
+            labels = NULL,
+            breaks = NULL
+        ) +
+        scale_y_continuous(
+            limits = y_lim,
+            breaks = if(show_horizontal_grid) {
+                pretty(y_lim, n = y_break_n)
+            } else {
+                waiver()
+            },
+            labels = if(show_horizontal_grid) scales::number_format(accuracy = 0.1) else waiver(),
+            expand = c(0,0),  # Small padding
+            oob = scales::oob_keep  # Keep out-of-bounds values instead of removing them
+        )+
+        # plot_theme()
+        labs(x = x_lab, y = y_lab, title = title) +
+        theme(
+            legend.position = "right",
+            axis.text.x = element_blank(),
+            axis.ticks.x = element_blank(),
+            panel.grid = element_blank(),
+            panel.spacing = unit(0, "lines"),
+            plot.margin = margin(t = 10, r = 10, b = 0, l = 10)
+        )
+    
+    ## Add chromosome ideogram if needed
+    if (show_chromosome_ideogram) {
+        
+        df$fill_color <- rep(
+            c("black", "white"), 
+            length.out = nrow(df)
+        )
+        df$label_color <- ifelse(
+            df$fill_color == "black", "white", "black"
+        )
+        
+        ideogram_data <- df |>
+            mutate(
+                xmin = chormStartPosFrom0,
+                xmax = chromlengthCumsum,
+                ymin = 0,
+                ymax = 1
+            )
+        
+        ideogram_plot <- ggplot() +
+            geom_rect(
+                data = ideogram_data,
+                aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+                fill = ideogram_data$fill_color,
+                color = "black",
+                size = 0.2
+            ) +
+            geom_text(
+                data = df,
+                aes(
+                    x = chromMidelePosFrom0, 
+                    y = 0.5, 
+                    label = chromName, 
+                    color = label_color
+                ),
+                size.unit = "pt",
+                size = ideogram_label_size,
+                inherit.aes = FALSE,
+                show.legend = FALSE
+            ) +
+            scale_color_identity() +
+            scale_x_continuous(
+                expand = x_expand, 
+                limits = if (is.null(x_lim)) {
+                    c(0, max(df$chromlengthCumsum))
+                } else {
+                    x_lim
+                },
+                name = x_lab
+            ) +
+            scale_y_continuous(
+                expand = c(0, 0),
+                limits = c(0, 1)
+            ) +
+            theme_void() +
+            plot_theme() +
+            theme(
+                axis.text.x = element_blank(),
+                axis.ticks.x = element_blank(),
+                axis.title.y = element_blank(),
+                axis.ticks.y = element_blank(),
+                axis.text.y = element_blank(),
+                plot.margin = margin(t = 0, r = 10, b = 10, l = 10)
+            )
+
+        combined_plot <- plot + ideogram_plot +
+            plot_layout(heights = rel_heights)
+
+        combined_plot & theme(
+            plot.margin = margin(10, 0, 10, 0),  # Remove all margins
+            panel.spacing = unit(0, "lines")   # Remove panel spacing
+        )
+
+        # plot <- plot +
+        #     geom_rect(
+        #         data = ideogram_data,
+        #         aes(
+        #             xmin = xmin, xmax = xmax, 
+        #             ymin = ymin, ymax = ymax 
+        #         ),
+        #         fill = ideogram_data$fill_color,
+        #         color = "black",
+        #         size = 0.2,
+        #         inherit.aes = FALSE
+        #     ) +
+        #     ## Add chromosome labels
+        #     geom_text(
+        #         data = df,
+        #         aes(
+        #             x = chromMidelePosFrom0,
+        #             y = label_y,
+        #             label = chromName,
+        #             color = label_color
+        #         ),
+        #         size.unit = "pt",
+        #         size = ideogram_label_size,
+        #         inherit.aes = FALSE,
+        #         show.legend = FALSE
+        #     )+
+        #     scale_color_identity()
+    }
+
+    plot
 }

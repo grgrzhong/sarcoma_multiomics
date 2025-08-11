@@ -4,7 +4,7 @@ study_colors <- list(
         "DEL" = "#4393c3", 
         "GAIN" = "#f4a582",
         "AMP" = "#d6604d",
-        "Multi" = "#b2182b"
+        "MULTI" = "#b2182b"
     ),
     FST.Group = c(
         "FS-DFSP" = "#E31A1C", 
@@ -37,6 +37,6 @@ group_comparisons <- list(
     list(
         group1 = c("U-DFSP", "Pre-FST"),
         group2 = c("Post-FST", "FS-DFSP"),
-        name = "Early_vs_Late_FST"
+        name = "U-DFSP+Pre-FST_vs_Post-FST+FS-DFSP"
     )
 )

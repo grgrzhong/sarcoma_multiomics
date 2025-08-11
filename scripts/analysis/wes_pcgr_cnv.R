@@ -13,11 +13,14 @@ suppressPackageStartupMessages(
     suppressWarnings({
         library(maftools)
         library(circlize)
+        library(BSgenome.Hsapiens.UCSC.hg38)
+        library(ggsci)
         library(ComplexHeatmap)
         library(reshape2)
     })
 )
 source(here::here("scripts/lib/study_lib.R"))
+source(here::here("conf/study_conf.R"))
 
 ## Output directories
 data_dir <- "data/processed"
@@ -29,6 +32,12 @@ capture_size <- 34
 ## Clinical information
 clinical_info <- LoadClinicalInfo()
 
+## "==========================================================================="
+## Gistic2 scrore plots --------------
+## "==========================================================================="
+gistic_dir <- "data/wes/GISTIC2/somatic_matched/U-DFSP"
+
+        
 ## "==========================================================================="
 ## Collect PCGR CNV data --------------
 ## "==========================================================================="
@@ -96,7 +105,7 @@ pcgr_cna_tbl <- pcgr_cna_raw |>
         ploidy = as.numeric(ploidy),
         purity = as.numeric(purity)
     ) |> 
-    rename(
+    dplyr::rename(
         facet_svtype = SVTYPE,
         facet_ploidy = ploidy,
         facet_purity = purity
@@ -108,40 +117,56 @@ pcgr_cna_tbl <- pcgr_cna_raw |>
     ## Define the CNV events
     mutate(
         cn_status = case_when(
-            !is.na(facet_ploidy) & total_cn == 0 ~ "Deep deletion",
+            ## "Deep deletion"
+            !is.na(facet_ploidy) & total_cn == 0 ~ "HOMDEL",
             
-            !is.na(facet_ploidy) & (total_cn -facet_ploidy) <= -1 ~ "Deletion",
+            ## Deletion
+            !is.na(facet_ploidy) & (total_cn -facet_ploidy) <= -1 ~ "DEL",
             
+            ## Neutral
             !is.na(facet_ploidy) & 
                 ((total_cn -facet_ploidy) > -1) &
-                ((total_cn -facet_ploidy) < 1) ~ "Neutral",
+                ((total_cn -facet_ploidy) < 1) ~ "NEUTRAL",
             
+            ## Amplification
             !is.na(facet_ploidy) & 
                 ((total_cn - facet_ploidy) >= 1) &
-                ((total_cn - facet_ploidy) < 3) ~ "Amplification",
+                ((total_cn - facet_ploidy) < 3) ~ "GAIN",
 
-            !is.na(facet_ploidy) & (total_cn - facet_ploidy) >=3 ~ "Deep amplification",
+            ## Deep amplification
+            !is.na(facet_ploidy) & (total_cn - facet_ploidy) >=3 ~ "AMP",
         ),
         .after = variant_class
     ) |> 
-    arrange(desc(facet_ploidy)) 
+    ## Keep only changed CNV events
+    dplyr::filter(cn_status != "NEUTRAL") |> 
+    arrange(desc(facet_ploidy))
 
-## Keep only changed CNV events
-pcgr_cna_tbl <- pcgr_cna_tbl |> filter(cn_status != "Neutral")
-
+## Save the filtered Non-Neutral PCGR CNV data
 SaveData(
     pcgr_cna_tbl,
     dir = "data/processed",
     filename = "wes_pcgr_DFSP_cohort_cnv_filtered"
 )
+
 ## "========================================================================="
 ## Differentially mutated and shared regions across groups
 ## "========================================================================="
+pcgr_cna_tbl <- LoadData(
+    dir = "data/processed",
+    filename = "wes_pcgr_DFSP_cohort_cnv_filtered"
+)
+
+length(unique(pcgr_cna_tbl$sample_id))
+
+clinical_info <- LoadClinicalInfo() |> 
+    filter(Somatic.Status %in% c("Matched"))
+
+total_samples <- clinical_info |> nrow()
+
 data <- pcgr_cna_tbl  |> 
-    left_join(
-        clinical_info |> select(Sample.ID, FST.Group),
-        by = c("sample_id" = "Sample.ID")
-    ) |> 
+    left_join(clinical_info, by = c("sample_id" = "Sample.ID")) |> 
+    filter(sample_id %in% clinical_info$Sample.ID) |> 
     relocate(FST.Group, .after = sample_id)
 
 ## Get the significantly different cytobands across groups
@@ -195,52 +220,20 @@ show_cytobands <- shared_cytobands$shared_cytobands |>
     ) |> 
     distinct()
 
-## Calculate the frequency of show cytobands
-cytoband_freq <- pcgr_cna_tbl  |> 
-    left_join(
-        clinical_info |> select(Sample.ID, Somatic.Status),
-        by = c("sample_id" = "Sample.ID")
-    ) |> 
-    filter(Somatic.Status %in% c("Matched")) |> 
-    select(sample_id, cytoband, cn_status) |> 
-    distinct() |> 
-    filter(cytoband  %in% show_cytobands$cytoband) |> 
-    group_by(cytoband) |> 
-    summarise(
-        alter_samples = n(),
-        alter_freq = alter_samples / total_cohort_size,
-        .groups = "drop"
-    ) |> 
-    arrange(desc(alter_freq))
-
 ## Prepare the oncoplot data
-cytoband_oncoplot_data <- pcgr_cna_tbl  |> 
-    left_join(
-        clinical_info |> select(Sample.ID, Somatic.Status),
-        by = c("sample_id" = "Sample.ID")
-    ) |> 
-    filter(Somatic.Status %in% c("Matched")) |> 
+cytoband_oncoplot_data <- data  |> 
     select(sample_id, cytoband, cn_status) |>
     distinct() |>
-    mutate(
-        alteration = case_when(
-            cn_status == "Deep deletion" ~ "HOMDEL",
-            cn_status == "Deletion" ~ "DEL",
-            cn_status == "Amplification" ~ "GAIN",
-            cn_status == "Deep amplification" ~ "AMP",
-            TRUE ~ cn_status
-        )
-    ) |> 
     group_by(sample_id, cytoband) |>
     summarise(
-        alterations = paste(unique(alteration), collapse = ";"),
+        alterations = paste(unique(cn_status), collapse = ","),
         .groups = "drop"
     ) |> 
     arrange(desc(alterations)) |> 
     mutate(
         final_alteration = case_when(
-            ## Count number of different alteration types (split by semicolon)
-            str_count(alterations, ";") >= 1 ~ "Multi",  # Multiple different alterations
+            ## Count number of different alteration types (split by comma)
+            str_count(alterations, ",") >= 1 ~ "MULTI",  # Multiple different alterations
             ## Single alterations
             alterations == "HOMDEL" ~ "HOMDEL",
             alterations == "DEL" ~ "DEL", 
@@ -249,14 +242,29 @@ cytoband_oncoplot_data <- pcgr_cna_tbl  |>
             TRUE ~ alterations
         )
     ) |> 
-    select(-alterations) |> 
     distinct()
 
-onco_matrix <- expand_grid(
-    sample_id = all_samples$sample_id,
+onco_data <- expand_grid(
+    sample_id = clinical_info$Sample.ID,
     cytoband = show_cytobands$cytoband
 ) |> 
-    left_join(cytoband_oncoplot_data, by = c("sample_id", "cytoband")) |> 
+    left_join(
+        cytoband_oncoplot_data |> select(-alterations), 
+        by = c("sample_id", "cytoband")
+    )
+
+## Calculate the frequency of show cytobands
+onco_freq <- cytoband_oncoplot_data |> 
+    select(-alterations) |> 
+    distinct() |> 
+    group_by(cytoband) |> 
+    summarise(
+        altered_samples = n(),
+        freq = altered_samples / total_samples
+    ) |> 
+    arrange(desc(altered_samples))
+
+onco_mat <- onco_data |> 
     mutate(
         final_alteration = if_else(
             is.na(final_alteration), "", final_alteration
@@ -273,17 +281,26 @@ onco_matrix <- expand_grid(
     as.matrix()
 
 ## Plot the oncoplot
+sample_sorted_level <- c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP")
+sample_sorted_by <- "FST.Group"
+column_title <- paste0(
+    "Somatic matched samples, N = ", total_samples
+)
+filename <- paste0(
+    "wes_cnvfacets_pcgr_oncoplot_somatic_matched_sort_by_", 
+    sample_sorted_by
+)
+
 GenerateCytobandOncoplot(
-    mat = onco_matrix,
+    mat = mat,
     sample_annotation = c("FST.Group", "Metastasis"),
-    sample_sorted_by = NULL,
-    sample_sorted_level = c(
-        "U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP"
-    ),
+    sample_sorted_by = sample_sorted_by,
+    sample_sorted_level = sample_sorted_level,
+    column_title = column_title,
     width = 18,
     height = 12,
     dir = "figures/oncoplot",
-    filename = "wes_cnvfacets_pcgr_oncoplot_somatic_matched"
+    filename = filename
 )
 
 
