@@ -13,6 +13,8 @@ suppressPackageStartupMessages(
         library(ggrepel)
         library(janitor)
         library(Cairo)
+        library(patchwork)
+        library(cowplot)
         library(tidyverse)
     })
 )
@@ -296,14 +298,14 @@ plotVariantFilter <- function(
         ) +
         # Add mean lines with labels
         geom_vline(
-            data = . %>% group_by(filter_status) %>%
+            data = . |> group_by(filter_status) |>
                 summarize(mean_count = mean(variant_count)),
             aes(xintercept = mean_count),
             linetype = "dashed", linewidth = 0.5, color = "red"
         ) +
         # Add mean value labels
         geom_text(
-            data = . %>% group_by(filter_status) %>%
+            data = . |> group_by(filter_status) |>
                 summarize(mean_count = mean(variant_count)),
             aes(x = mean_count, y = Inf, label = sprintf("Mean: %d", round(mean_count))),
             hjust = -0.1, vjust = 1.5, color = "black", size = 7, size.unit = "pt"
@@ -2520,14 +2522,14 @@ compare_gistic_groups <- function(untransformed_gistic, transformed_gistic,
     gistic_summary_trans <- getCytobandSummary(transformed_gistic)
     
     ## Separate amplifications and deletions
-    untrans_amp <- gistic_summary_untrans %>% 
+    untrans_amp <- gistic_summary_untrans |> 
         filter(Variant_Classification == "Amp")
-    untrans_del <- gistic_summary_untrans %>% 
+    untrans_del <- gistic_summary_untrans |> 
         filter(Variant_Classification == "Del")
     
-    trans_amp <- gistic_summary_trans %>% 
+    trans_amp <- gistic_summary_trans |> 
         filter(Variant_Classification == "Amp")
-    trans_del <- gistic_summary_trans %>% 
+    trans_del <- gistic_summary_trans |> 
         filter(Variant_Classification == "Del")
 
     ## Get actual sample counts if not provided
@@ -2648,10 +2650,10 @@ compare_gistic_genes <- function(untransformed_gistic, transformed_gistic) {
         trans_gene_summary <- getGeneSummary(transformed_gistic)
         
         ## Separate amplifications and deletions
-        untrans_amp_genes <- untrans_gene_summary %>% filter(Variant_Classification == "Amp")
-        untrans_del_genes <- untrans_gene_summary %>% filter(Variant_Classification == "Del")
-        trans_amp_genes <- trans_gene_summary %>% filter(Variant_Classification == "Amp")
-        trans_del_genes <- trans_gene_summary %>% filter(Variant_Classification == "Del")
+        untrans_amp_genes <- untrans_gene_summary |> filter(Variant_Classification == "Amp")
+        untrans_del_genes <- untrans_gene_summary |> filter(Variant_Classification == "Del")
+        trans_amp_genes <- trans_gene_summary |> filter(Variant_Classification == "Amp")
+        trans_del_genes <- trans_gene_summary |> filter(Variant_Classification == "Del")
 
         ## Compare amplified genes
         if (nrow(untrans_amp_genes) > 0 && nrow(trans_amp_genes) > 0) {
@@ -2756,10 +2758,10 @@ compare_gistic_transformation <- function(untransformed_gistic, transformed_gist
     gistic_summary_trans <- getCytobandSummary(transformed_gistic)
     
     ## Separate amplifications and deletions
-    untrans_amp <- gistic_summary_untrans %>% filter(Variant_Classification == "Amp")
-    untrans_del <- gistic_summary_untrans %>% filter(Variant_Classification == "Del")
-    trans_amp <- gistic_summary_trans %>% filter(Variant_Classification == "Amp")
-    trans_del <- gistic_summary_trans %>% filter(Variant_Classification == "Del")
+    untrans_amp <- gistic_summary_untrans |> filter(Variant_Classification == "Amp")
+    untrans_del <- gistic_summary_untrans |> filter(Variant_Classification == "Del")
+    trans_amp <- gistic_summary_trans |> filter(Variant_Classification == "Amp")
+    trans_del <- gistic_summary_trans |> filter(Variant_Classification == "Del")
 
     ## Compare amplifications and deletions
     amp_comparison <- compare_cna_by_type(untrans_amp, trans_amp, "Amplification",
@@ -2788,12 +2790,12 @@ compare_gistic_transformation <- function(untransformed_gistic, transformed_gist
     saveRDS(gene_results, here("results", paste0(output_prefix, "_gene_comparison.rds")))
     
     ## Create summary tables
-    transformation_enriched <- cytoband_results %>%
-        filter(transformation_enriched == TRUE, significant_in_transformed == TRUE) %>%
+    transformation_enriched <- cytoband_results |>
+        filter(transformation_enriched == TRUE, significant_in_transformed == TRUE) |>
         arrange(desc(frequency_difference))
     
-    transformation_specific <- cytoband_results %>%
-        filter(untransformed_count == 0, transformed_count > 0, significant_in_transformed == TRUE) %>%
+    transformation_specific <- cytoband_results |>
+        filter(untransformed_count == 0, transformed_count > 0, significant_in_transformed == TRUE) |>
         arrange(desc(transformed_freq))
     
     ## Save summary tables
@@ -2926,10 +2928,10 @@ compare_genes_between_groups <- function(untransformed_gistic, transformed_gisti
         
 
         ## Separate amplifications and deletions
-        untrans_amp_genes <- untrans_gene_summary %>% filter(Del == 0)
-        untrans_del_genes <- untrans_gene_summary %>% filter(Amp == 0)
-        trans_amp_genes <- trans_gene_summary %>% filter(Del == 0)
-        trans_del_genes <- trans_gene_summary %>% filter(Amp == 0)
+        untrans_amp_genes <- untrans_gene_summary |> filter(Del == 0)
+        untrans_del_genes <- untrans_gene_summary |> filter(Amp == 0)
+        trans_amp_genes <- trans_gene_summary |> filter(Del == 0)
+        trans_del_genes <- trans_gene_summary |> filter(Amp == 0)
         
         ## Compare amplified genes
         if (nrow(untrans_amp_genes) > 0 && nrow(trans_amp_genes) > 0) {
@@ -3051,9 +3053,9 @@ add_statistical_testing <- function(cytoband_results) {
 create_transformation_plots <- function(cytoband_results, output_prefix) {
     
     ## Filter for significant results
-    significant_results <- cytoband_results %>%
-        filter(transformation_enriched == TRUE, significant_in_transformed == TRUE) %>%
-        arrange(desc(frequency_difference)) %>%
+    significant_results <- cytoband_results |>
+        filter(transformation_enriched == TRUE, significant_in_transformed == TRUE) |>
+        arrange(desc(frequency_difference)) |>
         head(20)  # Top 20 for visualization
     
     if (nrow(significant_results) > 0) {
@@ -3592,7 +3594,7 @@ Gistic2GeneStat <- function(
     )
     
     ## Add interpretation columns for clarity
-    gene_comparison_results <- gene_comparison_results %>%
+    gene_comparison_results <- gene_comparison_results |>
         mutate(
             significantly_different = fisher_qvalue < 0.05,
             enriched_in_group2 = fisher_qvalue < 0.05 & fisher_odds_ratio > 1 & freq_difference > 0,
@@ -3650,7 +3652,7 @@ Gistic2CytobandStat <- function(
     )
     
     ## Add interpretation columns for clarity
-    cytoband_comparison_results <- cytoband_comparison_results %>%
+    cytoband_comparison_results <- cytoband_comparison_results |>
         mutate(
             significantly_different = fisher_qvalue < 0.05,
             enriched_in_group2 = fisher_qvalue < 0.05 & fisher_odds_ratio > 1 & freq_difference > 0,
@@ -4309,7 +4311,8 @@ GetPCGRCNVGroupDiffCytoband <- function(
     somatic_matched = TRUE,
     group1 = "U-DFSP",
     group2 = "FS-DFSP",
-    p_adjust_method = "BH",
+    p_adjust_method = "BH", # c("holm", "hochberg", "hommel", "bonferroni", "BH", "BY",
+#   "fdr", "none")
     min_altered_samples = 3,
     group_comparison = "U-DFSP_vs_FS-DFSP"
 ) {
@@ -4320,62 +4323,50 @@ GetPCGRCNVGroupDiffCytoband <- function(
             filter(event_type %in% {{event_type}})
     }
 
-    ## We should use the total cohort size as the denominator for frequency calculations
-    ## as we are answer the question "What proportion of samples have this alteration in my cohort?"
-    clinical_info <- LoadClinicalInfo()
+    ## We should use the total cohort size as the denominator for frequency 
+    ## calculations as we are answer the question "What proportion of samples 
+    ## have this alteration in my cohort?"
     
     if (somatic_matched) {
 
-        sample_ids <- clinical_info |> 
-            filter(Somatic.Status == "Matched") |> 
-            pull(Sample.ID)
-        
-        total_sample <- length(sample_ids)
+        clinical_info <- LoadClinicalInfo() |> 
+            filter(Somatic.Status == "Matched")
 
     } else {
 
-        sample_ids <- clinical_info |> 
-            pull(Sample.ID)
-
-        total_sample <- length(sample_ids)
+        clinical_info <- LoadClinicalInfo()
 
     }
-
-    message(paste(" - Total samples:", total_sample))
-
-    data <- data |> filter(sample_id %in% sample_ids)
-
-    ## Get samples in each group
-    group1_samples <- data |> 
-        filter(!!sym(var) %in% group1) |> 
-        pull(sample_id) |> 
-        unique()
-
-    group2_samples <- data |> 
-        filter(!!sym(var) %in% group2) |> 
-        pull(sample_id) |> 
-        unique()
-
-    message(paste(" - Group 1 samples:", length(group1_samples)))
-    message(paste(" - Group 2 samples:", length(group2_samples)))
     
+    ## Total samples of each group in cohort
+    n_sample <- nrow(clinical_info)
+    
+    n_group1 <- clinical_info |> 
+        filter(!!sym(var) %in% c(group1)) |> 
+        nrow()
+    
+    n_group2 <- clinical_info |> 
+        filter(!!sym(var) %in% c(group2)) |> 
+        nrow()
+
     ## Calculate alteration frequencies
-    data |>
+    freq_data <- data |>
         filter(!!sym(var) %in% c(group1, group2)) |> 
-        distinct(sample_id, cytoband, !!sym(cn_column), !!sym(var)) |> 
+        select(sample_id, cytoband, !!sym(cn_column), !!sym(var)) |>
+        distinct() |> 
         group_by(cytoband, !!sym(cn_column)) |> 
         summarise(
-            group1_altered = sum(sample_id %in% group1_samples),
-            group1_total = length(group1_samples),
-            group2_altered = sum(sample_id %in% group2_samples),
-            group2_total = length(group2_samples),
-            total_altered = n_distinct(sample_id),
+            group1_altered = sum(!!sym(var) %in% group1),
+            group1_total = n_group1,
+            group2_altered = sum(!!sym(var) %in% group2),
+            group2_total = n_group2,
+            total_altered = group1_altered + group2_altered,
             .groups = "drop"
-        ) |> 
+        ) |>
+        arrange(desc(total_altered)) |>
         ## Add back summary statistics
         left_join(
             data |> 
-                filter(!!sym(var) %in% c(group1, group2)) |> 
                 group_by(cytoband, !!sym(cn_column)) |>
                 summarise(
                     mean_segment_size = mean(segment_length_mb, na.rm = TRUE),
@@ -4390,7 +4381,10 @@ GetPCGRCNVGroupDiffCytoband <- function(
             group2_freq = group2_altered / group2_total,
             freq_diff = group2_freq - group1_freq
         ) |> 
-        ## Filter genes with sufficient alterations
+        arrange(desc(freq_diff))
+
+    ## Filter genes with sufficient alterations
+    freq_data |> 
         dplyr::filter(
             total_altered >= min_altered_samples,
             (group1_altered >= min_altered_samples | group2_altered >= min_altered_samples)
@@ -4411,7 +4405,7 @@ GetPCGRCNVGroupDiffCytoband <- function(
                 rownames(contingency_table) <- c("Group1", "Group2")
                 fisher.test(contingency_table)$p.value
             },
-            fisher_adds_ratio = {
+            fisher_odds_ratio = {
                 contingency_table <- matrix(
                     c(
                         group1_altered, group1_total - group1_altered,
@@ -4429,11 +4423,11 @@ GetPCGRCNVGroupDiffCytoband <- function(
         ## Adjust for multiple testing
         mutate(
             fisher_q = p.adjust(fisher_p, method = p_adjust_method),
-            significantly_different = fisher_q < 0.05,
+            sig_diff = fisher_q < 0.05,
             enriched_in_group2 = fisher_q < 0.05 & 
-                fisher_adds_ratio > 1 & freq_diff > 0,
+                fisher_odds_ratio > 1 & freq_diff > 0,
             depleted_in_group2 = fisher_q < 0.05 & 
-                fisher_adds_ratio < 1 & freq_diff < 0
+                fisher_odds_ratio < 1 & freq_diff < 0
         ) |> 
         arrange(fisher_q, desc(abs(freq_diff))) |> 
         mutate(
@@ -4478,9 +4472,7 @@ GetPCGRCNVGroupShareCytoband <- function(
         total_sample <- length(sample_ids)
 
     }
-
-    message(paste(" - Total samples:", total_sample))
-
+    
     data <- data |> filter(sample_id %in% sample_ids)
 
     ## Calculate gene frequencies
@@ -4512,28 +4504,19 @@ GetPCGRCNVGroupShareCytoband <- function(
         group_by(cytoband_alteration, cytoband, !!sym(cn_column)) |>
         summarise(
             n_groups_present = n(),
-            groups_present = paste(!!sym(var), collapse = ", "),
-            mean_freq = mean(freq),
-            min_freq = min(freq),
-            max_freq = max(freq),
-            range_freq = max_freq - min_freq,
+            groups_present_freq = paste(
+                paste0(!!sym(var), "(", round(freq, 2), ")"), collapse = ", "
+            ),
+            # freq = ,
             .groups = "drop"
         ) |> 
         filter(n_groups_present >= min_groups_present) |> 
-        arrange(desc(n_groups_present), desc(mean_freq)) 
-
-    summary <- shared_cytobands |> 
-        left_join(
-            cytoband_group_freq |>
-                select(cytoband_alteration, !!sym(var), n_samples_altered, total_samples, freq),
-            by = "cytoband_alteration"
-        ) |>
-        arrange(desc(n_groups_present), desc(mean_freq), cytoband_alteration, !!sym(var))
+        arrange(desc(n_groups_present)) 
     
     ## Return
     list(
-        summary = summary,
-        shared_cytobands = shared_cytobands
+        shared_cytobands = shared_cytobands,
+        cytoband_group_freq = cytoband_group_freq
     )
 }
 
@@ -4655,7 +4638,7 @@ GenerateCytobandOncoplot <- function(
         DEL = alter_graphic("rect", fill = alteration_colors[["DEL"]]),
         GAIN = alter_graphic("rect", fill = alteration_colors[["GAIN"]]),
         AMP = alter_graphic("rect", fill = alteration_colors[["AMP"]]),
-        MULTI = alter_graphic("rect", fill = alteration_colors[["MULTI"]])
+        MULTI = alter_graphic("rect", height = 0.33, fill = alteration_colors[["MULTI"]])
     )
 
     ## Plot the oncoprint
@@ -4758,11 +4741,10 @@ GenerateCytobandOncoplot <- function(
 
 }
 
-GenerateGisticChromPlot <- function(
-    gistic_dir,
+GisticChromPlot <- function(
+    data,
+    peaks_data = NULL,
     y_lim = NULL,
-    y_break_n = 6,
-    x_lim = NULL,
     x_expand = c(0.02, 0),
     title = NULL,
     x_lab = NULL,
@@ -4773,107 +4755,103 @@ GenerateGisticChromPlot <- function(
     grid_line_color = "grey80",
     grid_line_alpha = 1,
     grid_line_width = 0.5,
-    show_chromosome_ideogram = TRUE,
+    peak_label_size = 1.5,
+    peak_label_color = "black",
+    show_chromosome_ideogram = FALSE,
     ideogram_label_size = 4,
     rel_heights = c(4, 0.3)
 ) {
     
+    ## "--------------------------------------------------------------------"
     ## Get the chromosome information
-    df <- data.frame(
+    ## "--------------------------------------------------------------------"
+    chrom_info <- data.frame(
         chromName = seqnames(BSgenome.Hsapiens.UCSC.hg38), 
         chromlength = seqlengths(BSgenome.Hsapiens.UCSC.hg38)
     )
 
     ## Keep only chromsome 1-22
-    df <- df[1:22, ] |> as_tibble()
+    chrom_info <- chrom_info[1:22, ] |> as_tibble()
 
-    df$chromName <- str_remove(df$chromName, "chr")
+    chrom_info$chromName <- str_remove(chrom_info$chromName, "chr")
 
     ## make all chromosome coordinate are start from 0
-    df$chromlengthCumsum <- cumsum(as.numeric(df$chromlength))
-    df$chormStartPosFrom0 <- c(0, df$chromlengthCumsum[-nrow(df)])
+    chrom_info$chromlengthCumsum <- cumsum(as.numeric(chrom_info$chromlength))
+    chrom_info$chormStartPosFrom0 <- c(0, chrom_info$chromlengthCumsum[-nrow(chrom_info)])
 
     ## Calculate the middle coordinate for each chromosome
-    tmp_middle <- diff(c(0, df$chromlengthCumsum)) / 2
-    df$chromMidelePosFrom0 <- df$chormStartPosFrom0 + tmp_middle
-
-    ## Load the gistic score
-    file <- here(gistic_dir, "scores.gistic")
-    scores <- read.table(
-        file = file,
-        header = TRUE,
-        sep = "\t",
-        stringsAsFactors = FALSE
-    ) |> as_tibble()
+    tmp_middle <- diff(c(0, chrom_info$chromlengthCumsum)) / 2
+    chrom_info$chromMidelePosFrom0 <- chrom_info$chormStartPosFrom0 + tmp_middle
 
     ## Use the start of coordinate as the Amp or Del
-    chromID <- scores$Chromosome
-    scores$StartPos <- scores$Start + df$chormStartPosFrom0[chromID]
-    scores$EndPos <- scores$End + df$chormStartPosFrom0[chromID]
+    chromID <- data$Chromosome
+    data$StartPos <- data$Start + chrom_info$chormStartPosFrom0[chromID]
+    data$EndPos <- data$End + chrom_info$chormStartPosFrom0[chromID]
 
     ## Convert the to Del to be negative
-    scores[scores$Type == "Del", "G.score"] <- scores[scores$Type == "Del", "G.score"] * -1
+    data[data$Type == "Del", "G.score"] <- data[data$Type == "Del", "G.score"] * -1
+
+    ## "--------------------------------------------------------------------"
+    ## Process peaks data if provided
+    ## "--------------------------------------------------------------------"
+    if (!is.null(peaks_data) && nrow(peaks_data) > 0) {
+        # Add positional information to peaks using the same coordinate system
+        peaks_data$StartPos <- peaks_data$Start + chrom_info$chormStartPosFrom0[peaks_data$Chromosome]
+        peaks_data$EndPos <- peaks_data$End + chrom_info$chormStartPosFrom0[peaks_data$Chromosome]
+        peaks_data$MidPos <- (peaks_data$StartPos + peaks_data$EndPos) / 2
+        
+        # Find the G-score at peak positions by matching to nearest data point
+        peaks_data$G_score_at_peak <- sapply(
+            peaks_data$MidPos, function(pos) {
+                closest_idx <- which.min(abs(data$StartPos - pos))
+                data$G.score[closest_idx]
+            }
+        )
+
+        # Position labels above/below peaks with some offset
+        peaks_data <- peaks_data |>
+            mutate(
+                label_y = case_when(
+                    Type == "Amp" ~ pmax(G_score_at_peak + 0.15, 0.1),  # Above positive peaks
+                    Type == "Del" ~ pmin(G_score_at_peak - 0.15, -0.1), # Below negative peaks
+                    TRUE ~ G_score_at_peak + 0.15
+                )
+            )
+    }
 
     ## Determine y-axis limits if not provided
     if (is.null(y_lim)) {
-        y_range <- range(scores$G.score, na.rm = TRUE)
+        y_range <- range(data$G.score, na.rm = TRUE)
         y_padding <- diff(y_range) * 0.1
         y_lim <- c(y_range[1] - y_padding, y_range[2] + y_padding)
+
+        ## Use the integer for y lim
+        y_lim <- round(y_lim)
+        
     }
     
-    # ## Create chromosome ideogram data
-    # if (show_chromosome_ideogram) {
-    #     # Create alternating colors for chromosomes
-    #     df$fill_color <- rep(
-    #         c("black", "white"), 
-    #         length.out = nrow(df)
-    #     )
-        
-    #     if (is.null(ideogram_y_position)) {
-    #         # Default positions if not provided
-    #         ideogram_y_top <- y_lim[1] - 0.15 * diff(y_lim)
-    #         ideogram_y_bottom <- y_lim[1] - 0.2 * diff(y_lim)
-    #     } else {
-    #         # Use provided vector: c(top, bottom)
-    #         ideogram_y_top <- ideogram_y_position[1]
-    #         ideogram_y_bottom <- ideogram_y_position[2]
-    #     }
-        
-    #     # Create ideogram rectangles
-    #     ideogram_data <- df |>
-    #         mutate(
-    #             xmin = chormStartPosFrom0,
-    #             xmax = chromlengthCumsum,
-    #             ymin = ideogram_y_top,
-    #             ymax = ideogram_y_bottom
-    #         )
-        
-    #     # Calculate label positions - middle of ideogram top and bottom
-    #     df$label_y <- (ideogram_y_top + ideogram_y_bottom) / 2
-
-    #     # Set label colors based on rectangle colors (opposite colors for contrast)
-    #     df$label_color <- ifelse(
-    #         df$fill_color == "black", "white", "black"
-    #     )
-    # }
+    y_breaks <- pretty(y_lim, n = y_lim[2] - y_lim[1])
+    x_lim <- c(0, max(chrom_info$chromlengthCumsum))
     
     ## Create the base plot
-    plot <- ggplot(scores, aes(StartPos, G.score)) +
+    plot <- ggplot(data, aes(StartPos, G.score)) +
         geom_area(
-            aes(group = Type, fill = factor(Type, levels = c("Del", "Amp")))
+            aes(group = Type, fill = factor(Type, levels = c("Del", "Amp"))),
+            alpha = 0.8
         ) +
         scale_fill_lancet(
             guide = guide_legend(reverse = TRUE), name = "Type"
         )
-    
+
     ## Add the horizontal grid lines
     if (show_horizontal_grid) {
         
-        y_breaks <- pretty(y_lim, n = y_break_n)
-        
+        # Remove the horizontal line at y=0
+        h_y_breaks <- y_breaks[y_breaks != 0]
+
         plot <- plot +
             geom_hline(
-                yintercept = y_breaks, 
+                yintercept = h_y_breaks, 
                 linetype = grid_line_type, 
                 color = grid_line_color, 
                 alpha = grid_line_alpha,
@@ -4884,10 +4862,12 @@ GenerateGisticChromPlot <- function(
     ## Add vertical chromosome separator lines
     if (show_vertical_grid) {
 
-        # Create vertical lines at chromosome boundaries (excluding the first position and last)
+        # Create vertical lines at chromosome boundaries
+        ## excluding the first position and last
         chromosome_boundaries <- c(
             0,
-            df$chromlengthCumsum[-length(df$chromlengthCumsum)]
+            # chrom_info$chromlengthCumsum[-length(chrom_info$chromlengthCumsum)]
+            chrom_info$chromlengthCumsum
         )
         
         plot <- plot +
@@ -4899,50 +4879,110 @@ GenerateGisticChromPlot <- function(
                 size = grid_line_width
             )  
     }
+    
+    ## "--------------------------------------------------------------------"
+    ## Add peak labels if peaks_data is provided
+    ## "--------------------------------------------------------------------"
 
-    ## main plot
+    if (!is.null(peaks_data) && nrow(peaks_data) > 0) {
+        plot <- plot +
+            # Add peak points
+            # geom_point(
+            #     data = peaks_data,
+            #     aes(x = MidPos, y = G_score_at_peak),
+            #     color = peak_label_color,
+            #     size = 1.5,
+            #     inherit.aes = FALSE
+            # ) +
+            # # Add connecting lines from peak to label
+            # geom_segment(
+            #     data = peaks_data,
+            #     aes(
+            #         x = MidPos, xend = MidPos,
+            #         y = G_score_at_peak, yend = label_y
+            #     ),
+            #     color = peak_label_color,
+            #     alpha = 0.6,
+            #     size = 0.3,
+            #     inherit.aes = FALSE
+            # ) +
+            # Add peak labels using ggrepel for better positioning
+            ggrepel::geom_text_repel(
+                data = peaks_data,
+                aes(
+                    x = MidPos, 
+                    y = label_y, 
+                    label = peak_label
+                ),
+                size = peak_label_size,
+                color = peak_label_color,
+                fontface = "plain",
+                family = "Arial",
+                # Repel parameters to avoid overlap
+                min.segment.length = 0, # always show segments
+                segment.color = peak_label_color,
+                segment.alpha = 0.6,    # make segments more visible
+                segment.size = 0.3,     # thicker segments
+                segment.linetype = "solid", # solid line segments
+                
+                # Force labels further away to create longer segments
+                box.padding = 0.3,   # creates more space around text boxes, forcing longer segments
+                point.padding = 0.3, # creates more space around the original points
+                force = 5,           # stronger repelling force pushes labels further away
+                force_pull = 3,      # Added parameter that pulls labels toward empty areas
+                max.overlaps = Inf,
+
+                # Direction control to make segmetns longer
+                direction = "both",   # # Allow both x and y movement
+                nudge_y = ifelse(peaks_data$Type == "Del", -0.3, 0.3), # Pushes labels further up (for Amp) or down (for Del) from their original positions
+                
+                # Keep labels within plot area
+                xlim = c(x_lim[1], x_lim[2]),
+                ylim = c(y_lim[1], y_lim[2]),
+                inherit.aes = FALSE
+            )
+    }
+
+    ## Main plot styling
     plot <- plot +
         scale_x_continuous(
             expand = x_expand, 
-            limits = c(0, max(df$chromlengthCumsum)), 
-            name = x_lab, 
+            limits = x_lim, 
+            name = NULL, 
             labels = NULL,
             breaks = NULL
         ) +
         scale_y_continuous(
             limits = y_lim,
-            breaks = if(show_horizontal_grid) {
-                pretty(y_lim, n = y_break_n)
-            } else {
-                waiver()
-            },
-            labels = if(show_horizontal_grid) scales::number_format(accuracy = 0.1) else waiver(),
+            breaks = y_breaks,
+            labels = scales::number_format(accuracy = 0.1),
             expand = c(0,0),  # Small padding
             oob = scales::oob_keep  # Keep out-of-bounds values instead of removing them
-        )+
-        # plot_theme()
-        labs(x = x_lab, y = y_lab, title = title) +
+        ) +
+        labs(y = y_lab, title = title) +
+        theme_classic() +
+        plot_theme() +
         theme(
             legend.position = "right",
             axis.text.x = element_blank(),
             axis.ticks.x = element_blank(),
-            panel.grid = element_blank(),
-            panel.spacing = unit(0, "lines"),
-            plot.margin = margin(t = 10, r = 10, b = 0, l = 10)
+            panel.grid = element_blank()
         )
-    
+
+    ## "--------------------------------------------------------------------"
     ## Add chromosome ideogram if needed
+    ## "--------------------------------------------------------------------"
     if (show_chromosome_ideogram) {
         
-        df$fill_color <- rep(
+        chrom_info$fill_color <- rep(
             c("black", "white"), 
-            length.out = nrow(df)
+            length.out = nrow(chrom_info)
         )
-        df$label_color <- ifelse(
-            df$fill_color == "black", "white", "black"
+        chrom_info$label_color <- ifelse(
+            chrom_info$fill_color == "black", "white", "black"
         )
         
-        ideogram_data <- df |>
+        ideogram_data <- chrom_info |>
             mutate(
                 xmin = chormStartPosFrom0,
                 xmax = chromlengthCumsum,
@@ -4959,7 +4999,7 @@ GenerateGisticChromPlot <- function(
                 size = 0.2
             ) +
             geom_text(
-                data = df,
+                data = chrom_info,
                 aes(
                     x = chromMidelePosFrom0, 
                     y = 0.5, 
@@ -4974,12 +5014,10 @@ GenerateGisticChromPlot <- function(
             scale_color_identity() +
             scale_x_continuous(
                 expand = x_expand, 
-                limits = if (is.null(x_lim)) {
-                    c(0, max(df$chromlengthCumsum))
-                } else {
-                    x_lim
-                },
-                name = x_lab
+                limits = x_lim,
+                name = x_lab,
+                labels = NULL,
+                breaks = NULL
             ) +
             scale_y_continuous(
                 expand = c(0, 0),
@@ -4996,42 +5034,402 @@ GenerateGisticChromPlot <- function(
                 plot.margin = margin(t = 0, r = 10, b = 10, l = 10)
             )
 
-        combined_plot <- plot + ideogram_plot +
-            plot_layout(heights = rel_heights)
-
-        combined_plot & theme(
-            plot.margin = margin(10, 0, 10, 0),  # Remove all margins
-            panel.spacing = unit(0, "lines")   # Remove panel spacing
+        plot <- wrap_plots(
+            plot + 
+                theme(
+                    plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), units = "cm"),
+                    panel.spacing = unit(0, "lines")
+                ), 
+            ideogram_plot,
+            ncol = 1,
+            heights =  rel_heights
         )
 
-        # plot <- plot +
-        #     geom_rect(
-        #         data = ideogram_data,
-        #         aes(
-        #             xmin = xmin, xmax = xmax, 
-        #             ymin = ymin, ymax = ymax 
-        #         ),
-        #         fill = ideogram_data$fill_color,
-        #         color = "black",
-        #         size = 0.2,
-        #         inherit.aes = FALSE
-        #     ) +
-        #     ## Add chromosome labels
-        #     geom_text(
-        #         data = df,
-        #         aes(
-        #             x = chromMidelePosFrom0,
-        #             y = label_y,
-        #             label = chromName,
-        #             color = label_color
-        #         ),
-        #         size.unit = "pt",
-        #         size = ideogram_label_size,
-        #         inherit.aes = FALSE,
-        #         show.legend = FALSE
-        #     )+
-        #     scale_color_identity()
     }
 
+    ## Return
     plot
+}
+
+LoadGisticScore <- function(
+    gistic_dir = "data/wes/GISTIC2/somatic_matched",
+    group = "U-DFSP"
+) {
+    
+    file <- here(gistic_dir, group, "scores.gistic")
+    
+    data <- read.table(
+        file = file,
+        header = TRUE,
+        sep = "\t",
+        stringsAsFactors = FALSE
+    ) |> as_tibble()
+
+    return(data)
+}
+
+GetPCGRGisticOverlap <- function(
+    peak_label,
+    pcgr_cna_data, 
+    gistic_score_data, 
+    min_overlap = 0.5
+) {
+    
+    ## peak labels pcgr cytoband data
+    
+    ## Get the coordinate for each peak labels
+    peak_data <- list()
+    
+    for (i in peak_label) {
+        
+        message(paste(" - Processing peak:", i))
+
+        data <- pcgr_cna_data |> 
+            filter(cytoband_alteration %in% i) |> 
+            select(
+                cytoband_alteration, chrom, start, end, var_id, "cytoband", "cn_status"
+            ) |>
+            distinct()
+    
+        peak_type <- case_when(
+            str_detect(i, "DEL|HOMDEL") ~ "Del",
+            str_detect(i, "AMP|GAIN") ~ "Amp",
+            TRUE ~ "Other"
+        )
+    
+        ## Create GRanges objects
+        pcgr_ranges <- GRanges(
+            seqnames = data$chrom,
+            ranges = IRanges(
+                start = data$start,
+                end = data$end
+            ),
+            mcols = data[, c("var_id", "cytoband", "cn_status")]
+        )
+    
+        gistic_ranges <- GRanges(
+            seqnames = paste0("chr", gistic_score$Chromosome),
+            ranges = IRanges(
+                start = gistic_score$Start,
+                end = gistic_score$End
+            ),
+            mcols = gistic_score[, c("Type", "G.score", "X.log10.q.value.", "frequency")]
+        )
+
+        ## Find overlaps
+        overlaps <- findOverlaps(pcgr_ranges, gistic_ranges)
+        
+        if (length(overlaps) == 0) {
+            warning("No overlaps found between PCGR data and GISTIC scores")
+            return(tibble())
+        }
+
+        ## Calculate overlap fractions
+        overlap_widths <- width(
+            pintersect(
+                pcgr_ranges[queryHits(overlaps)],
+                gistic_ranges[subjectHits(overlaps)]
+            )
+        )
+
+        pcgr_widths <- width(pcgr_ranges[queryHits(overlaps)])
+        
+        overlap_fractions <- overlap_widths / pcgr_widths
+        
+        ## Filter by minimum overlap
+        valid_overlaps <- overlaps[overlap_fractions >= min_overlap]
+        
+        if (length(valid_overlaps) == 0) {
+            warning("No overlaps found meeting the minimum overlap threshold")
+            return(tibble())
+        }
+
+        ## Create overlapped data and summarize by cytoband
+        peak_data[[i]] <- data[queryHits(valid_overlaps), ] |>
+            bind_cols(
+                gistic_score_data[
+                    subjectHits(valid_overlaps), 
+                    # c("Type", "G.score", "X.log10.q.value.", "frequency")
+                ]
+            ) |>
+            mutate(
+                overlap_fraction = overlap_fractions[overlap_fractions >= min_overlap]
+            ) |>
+            filter(Type %in% peak_type) |> 
+            group_by(cytoband, cn_status, cytoband_alteration, Chromosome, Type) |> 
+            summarise(
+                ## Use mean positions for peak coordinates
+                Start = as.integer(mean(Start)),
+                End = as.integer(mean(End)),
+                mean_gistic_score = mean(G.score, na.rm = TRUE),
+                max_gistic_score = max(G.score, na.rm = TRUE),
+                mean_overlap = mean(overlap_fraction),
+                .groups = "drop"
+            )
+    }
+
+    list_rbind(peak_data)
+}
+
+GetPCGRGisticOverlap2 <- function(
+    peak_label,
+    pcgr_cna_data, 
+    gistic_score_data, 
+    min_overlap = 0.5,
+    overlap_method = "any"  # "any", "pcgr_based", "gistic_based", "reciprocal"
+) {
+    
+     ## Get the coordinate for each peak labels
+    peak_data <- list()
+    successful_peaks <- character()
+    failed_peaks <- character()
+    
+    for (i in peak_label) {
+        
+        message(paste(" - Processing peak:", i))
+        
+        data <- pcgr_cna_data |> 
+            filter(cytoband_alteration %in% i) |> 
+            select(
+                cytoband_alteration, chrom, start, end, var_id, "cytoband", "cn_status"
+            ) |>
+            distinct()
+        
+        if (nrow(data) == 0) {
+            warning("No PCGR data found for peak: ", i)
+            failed_peaks <- c(failed_peaks, i)
+            next
+        }
+    
+        peak_type <- case_when(
+            str_detect(i, "DEL|HOMDEL") ~ "Del",
+            str_detect(i, "AMP|GAIN") ~ "Amp",
+            TRUE ~ "Other"
+        )
+    
+        ## Create GRanges objects
+        pcgr_ranges <- GRanges(
+            seqnames = data$chrom,
+            ranges = IRanges(
+                start = data$start,
+                end = data$end
+            ),
+            mcols = data[, c("var_id", "cytoband", "cn_status")]
+        )
+    
+        gistic_ranges <- GRanges(
+            seqnames = paste0("chr", gistic_score_data$Chromosome),
+            ranges = IRanges(
+                start = gistic_score_data$Start,
+                end = gistic_score_data$End
+            ),
+            mcols = gistic_score_data[, c("Type", "G.score", "X.log10.q.value.", "frequency")]
+        )
+
+        ## Find overlaps - use different strategies based on overlap_method
+        if (overlap_method == "any") {
+            overlaps <- findOverlaps(pcgr_ranges, gistic_ranges, minoverlap = 1L)
+        } else {
+            overlaps <- findOverlaps(pcgr_ranges, gistic_ranges)
+        }
+        
+        if (length(overlaps) == 0) {
+            warning("No overlaps found between PCGR data and GISTIC scores for peak: ", i)
+            failed_peaks <- c(failed_peaks, i)
+            next
+        }
+
+        ## Calculate overlap fractions only if needed
+        if (overlap_method != "any") {
+            overlap_widths <- width(
+                pintersect(
+                    pcgr_ranges[queryHits(overlaps)],
+                    gistic_ranges[subjectHits(overlaps)]
+                )
+            )
+            
+            pcgr_widths <- width(pcgr_ranges[queryHits(overlaps)])
+            gistic_widths <- width(gistic_ranges[subjectHits(overlaps)])
+            
+            ## Choose overlap method
+            if (overlap_method == "pcgr_based") {
+                overlap_fractions <- overlap_widths / pcgr_widths
+            } else if (overlap_method == "gistic_based") {
+                overlap_fractions <- overlap_widths / gistic_widths
+            } else if (overlap_method == "reciprocal") {
+                overlap_fractions <- pmin(
+                    overlap_widths / pcgr_widths,
+                    overlap_widths / gistic_widths
+                )
+            }
+            
+            ## Filter by minimum overlap
+            valid_overlaps <- overlaps[overlap_fractions >= min_overlap]
+            valid_overlap_fractions <- overlap_fractions[overlap_fractions >= min_overlap]
+        } else {
+            valid_overlaps <- overlaps
+            valid_overlap_fractions <- rep(1, length(overlaps))
+        }
+        
+        if (length(valid_overlaps) == 0) {
+            warning("No overlaps found meeting the minimum overlap threshold for peak: ", i)
+            failed_peaks <- c(failed_peaks, i)
+            next
+        }
+
+        ## Filter GISTIC data for the correct type (Amp/Del)
+        gistic_subset <- gistic_score_data[subjectHits(valid_overlaps), ] |>
+            filter(Type == peak_type)
+        
+        if (nrow(gistic_subset) == 0) {
+            warning("No GISTIC scores of type '", peak_type, "' found for peak: ", i)
+            failed_peaks <- c(failed_peaks, i)
+            next
+        }
+        
+        ## Get corresponding PCGR data indices after filtering
+        pcgr_subset_indices <- queryHits(valid_overlaps)[which(gistic_score_data[subjectHits(valid_overlaps), ]$Type == peak_type)]
+        gistic_subset_indices <- subjectHits(valid_overlaps)[which(gistic_score_data[subjectHits(valid_overlaps), ]$Type == peak_type)]
+        
+        ## Create overlapped data and summarize
+        peak_result <- data[pcgr_subset_indices, ] |>
+            bind_cols(
+                gistic_score_data[gistic_subset_indices, ] |>
+                    select(Chromosome, Start, End, Type, G.score, X.log10.q.value., frequency)
+            ) |>
+            mutate(
+                overlap_fraction = valid_overlap_fractions[which(gistic_score_data[subjectHits(valid_overlaps), ]$Type == peak_type)]
+            ) |>
+            group_by(cytoband, cn_status, cytoband_alteration, Chromosome, Type) |> 
+            summarise(
+                Start = as.integer(round(weighted.mean(Start, overlap_fraction, na.rm = TRUE))),
+                End = as.integer(round(weighted.mean(End, overlap_fraction, na.rm = TRUE))),
+                mean_gistic_score = if(all(is.na(G.score))) NA_real_ else weighted.mean(G.score, overlap_fraction, na.rm = TRUE),
+                max_gistic_score = if(all(is.na(G.score))) NA_real_ else max(G.score, na.rm = TRUE),
+                mean_overlap = mean(overlap_fraction, na.rm = TRUE),
+                n_overlapping_intervals = n(),
+                .groups = "drop"
+            ) |>
+            filter(!is.na(mean_gistic_score))  # Remove peaks with no valid GISTIC scores
+
+        if (nrow(peak_result) > 0) {
+            peak_data[[i]] <- peak_result
+            successful_peaks <- c(successful_peaks, i)
+        } else {
+            failed_peaks <- c(failed_peaks, i)
+        }
+    }
+
+    ## Print summary
+    message(paste("Successfully processed", length(successful_peaks), "peaks"))
+    message(paste("Failed to process", length(failed_peaks), "peaks"))
+    
+    if (length(failed_peaks) > 0) {
+        message("Failed peaks: ", paste(failed_peaks[1:min(5, length(failed_peaks))], collapse = ", "))
+        if (length(failed_peaks) > 5) {
+            message("... and", length(failed_peaks) - 5, "more")
+        }
+    }
+
+    if (length(peak_data) == 0) {
+        warning("No valid peak data found for any peaks")
+        return(tibble())
+    }
+
+    result <- list_rbind(peak_data)
+    return(result)
+}
+
+AddPeaksPCGRCountData <- function(
+    peaks_data,
+    pcgr_cna_data,
+    var,
+    cn_column = "cn_status",
+    event_type = NULL,
+    group,
+    is_somatic_matched = TRUE
+) {
+    ## Filter by event type
+    if (!is.null(event_type)) {
+        data <- pcgr_cna_data |> 
+            filter(event_type %in% {{event_type}})
+    } else {
+
+        data <- pcgr_cna_data
+    }
+
+    ## We should use the total cohort size as the denominator for frequency 
+    ## calculations as we are answer the question "What proportion of samples 
+    ## have this alteration in my cohort?"
+    
+    if (is_somatic_matched) {
+
+        clinical_info <- LoadClinicalInfo() |> 
+            filter(Somatic.Status == "Matched")
+
+    } else {
+
+        clinical_info <- LoadClinicalInfo()
+
+    }
+    
+    ## Total samples of each group in cohort
+    n_sample <- nrow(clinical_info)
+
+    n_sample_group <- clinical_info |> 
+        filter(!!sym(var) %in% group) |> 
+        nrow()
+
+    count_data <- data |> 
+        filter(sample_id %in% clinical_info$Sample.ID) |> 
+        filter(cytoband_alteration %in% peaks_data$cytoband_alteration) |> 
+        filter(!!sym(var) %in% group) |>
+        group_by(cytoband_alteration, cytoband, !!sym(cn_column)) |>
+        summarise(
+            group_altered = n_distinct(sample_id),
+            group_total = n_sample_group,
+            freq = group_altered / group_total,
+            .groups = "drop"
+        ) |> 
+        mutate(
+            group = {{group}},
+            peak_label = sapply(
+                str_split(cytoband, ":"),
+                function(x) x[2]
+            )
+        ) |> 
+        mutate(
+            peak_label = paste0(
+                peak_label, "(", group_altered, ")"
+            )
+        )
+
+    ## Merge the count data
+    peaks_data |> 
+        left_join(
+            count_data,
+            by = c("cytoband", "cn_status", "cytoband_alteration")
+        ) |> 
+        filter(!is.na(group_altered))
+}
+
+LoadPCGRCytobandStatData <- function(
+    is_somatic_matched = TRUE
+) {
+
+    dir <- "data/processed"
+
+    if (is_somatic_matched) {
+        
+        filename <- "wes_pcgr_DFSP_cohort_somatic_matched_cytoband_stats"
+
+    } else {
+        
+        filename <- "wes_pcgr_DFSP_cohort_all_cytoband_stats"
+    }
+
+    LoadData(
+        filename = filename,
+        dir = dir
+    )
 }

@@ -14,6 +14,7 @@ suppressPackageStartupMessages(
         library(maftools)
         library(circlize)
         library(BSgenome.Hsapiens.UCSC.hg38)
+        library(GenomicRanges)
         library(ggsci)
         library(ComplexHeatmap)
         library(reshape2)
@@ -33,13 +34,7 @@ capture_size <- 34
 clinical_info <- LoadClinicalInfo()
 
 ## "==========================================================================="
-## Gistic2 scrore plots --------------
-## "==========================================================================="
-gistic_dir <- "data/wes/GISTIC2/somatic_matched/U-DFSP"
-
-        
-## "==========================================================================="
-## Collect PCGR CNV data --------------
+## Preprocess PCGR CNV data --------------
 ## "==========================================================================="
 ## Merge all PCGR outputs
 pcgr_dir <- "data/wes/PCGR"
@@ -47,6 +42,12 @@ pcgr_cna_raw <- CollectPCGRCNAData(dir = pcgr_dir)
 
 unique(pcgr_cna_raw$event_type)
 unique(pcgr_cna_raw$variant_class)
+length(unique(pcgr_cna_raw$sample_id))
+pcgr_cna_raw |> 
+    filter(variant_class != "undefined") |> 
+    pull(sample_id) |> 
+    unique() |> 
+    length()
 
 ## Save the raw PCGR CNV data
 SaveData(
@@ -55,9 +56,6 @@ SaveData(
     filename = "wes_pcgr_DFSP_cohort_cnv_raw_data"
 )
 
-## "==========================================================================="
-## Preprocess PCGR CNV data --------------
-## "==========================================================================="
 ## Load the PCGR annotated CNV data
 pcgr_cna_raw <- LoadData(
     dir = "data/processed", 
@@ -142,6 +140,10 @@ pcgr_cna_tbl <- pcgr_cna_raw |>
     dplyr::filter(cn_status != "NEUTRAL") |> 
     arrange(desc(facet_ploidy))
 
+## One sample do not have non-neutral CNA: "DFSP-169-T"
+length(unique(pcgr_cna_tbl$sample_id))
+setdiff(pcgr_cna_raw$sample_id, pcgr_cna_tbl$sample_id)
+
 ## Save the filtered Non-Neutral PCGR CNV data
 SaveData(
     pcgr_cna_tbl,
@@ -155,19 +157,34 @@ SaveData(
 pcgr_cna_tbl <- LoadData(
     dir = "data/processed",
     filename = "wes_pcgr_DFSP_cohort_cnv_filtered"
-)
-
-length(unique(pcgr_cna_tbl$sample_id))
+) |> 
+    separate_wider_delim(
+        position_range,
+        names = c("start", "end"),
+        delim = "-"
+    ) |> 
+    mutate(
+        chrom = str_extract(var_id, "chr[0-9XY]+"), .after = "sample_id",
+        start = as.integer(start),
+        end = as.integer(end)
+    ) |> 
+    mutate(
+        cytoband_alteration = paste0(cytoband, "_", cn_status),
+        .after = cn_status
+    ) |>
+    left_join(clinical_info, by = c("sample_id" = "Sample.ID"))
 
 clinical_info <- LoadClinicalInfo() |> 
     filter(Somatic.Status %in% c("Matched"))
 
 total_samples <- clinical_info |> nrow()
 
-data <- pcgr_cna_tbl  |> 
+data <- pcgr_cna_tbl |> 
     left_join(clinical_info, by = c("sample_id" = "Sample.ID")) |> 
     filter(sample_id %in% clinical_info$Sample.ID) |> 
     relocate(FST.Group, .after = sample_id)
+
+length(unique(data$sample_id))
 
 ## Get the significantly different cytobands across groups
 all_diff_cytoands <- map_dfr(
@@ -212,6 +229,29 @@ shared_cytobands <- GetPCGRCNVGroupShareCytoband(
     min_groups_present = 1
 )
 
+## Save the cytoband stat data
+SaveData(
+    list(
+        all_diff_cytoands = all_diff_cytoands,
+        sig_diff_cytobands = sig_diff_cytobands,
+        shared_cytobands = shared_cytobands
+    ),
+    dir = "data/processed",
+    filename = "wes_pcgr_DFSP_cohort_somatic_matched_cytoband_stats"
+)
+
+## Save the different and shared regions across groups
+write_xlsx(
+    list(
+        shared_cytobands = shared_cytobands$shared_cytobands,
+        diff_cytobands = sig_diff_cytobands
+    ),
+    here(
+        "outputs", "wes_pcgr_DFSP_cohort_somatic_matched_diff_shared_cytoband.xlsx"
+    )
+)
+
+## All the shared and different cytoand data
 show_cytobands <- shared_cytobands$shared_cytobands |> 
     select(cytoband_alteration, cytoband, cn_status) |> 
     bind_rows(
@@ -219,6 +259,9 @@ show_cytobands <- shared_cytobands$shared_cytobands |>
         select(cytoband_alteration, cytoband, cn_status)
     ) |> 
     distinct()
+
+all_diff_cytoands |> 
+    filter(cytoband  %in% c("chr7:q36.1"))
 
 ## Prepare the oncoplot data
 cytoband_oncoplot_data <- data  |> 
@@ -292,7 +335,7 @@ filename <- paste0(
 )
 
 GenerateCytobandOncoplot(
-    mat = mat,
+    mat = onco_mat,
     sample_annotation = c("FST.Group", "Metastasis"),
     sample_sorted_by = sample_sorted_by,
     sample_sorted_level = sample_sorted_level,
@@ -303,6 +346,78 @@ GenerateCytobandOncoplot(
     filename = filename
 )
 
+## "==========================================================================="
+## Map the peaks in gistic2 scrore data --------------
+## "==========================================================================="
+## Load the cytoband stat res
+cytoband_stat_res <- LoadPCGRCytobandStatData()
+all_diff_cytoands <- cytoband_stat_res$all_diff_cytoands
+
+peak_label <- c("chr7:q36.1_DEL", "chr6:p21.33_HOMDEL")
+
+gistic_dir <- "data/wes/GISTIC2/somatic_matched"
+
+plots <- list()
+for (group in subtype_FST) {
+    
+    ## Load the gistic score
+    gistic_score <- LoadGisticScore(
+        gistic_dir = gistic_dir,
+        group = group
+    )
+
+    n_samples <- LoadClinicalInfo() |> 
+        filter(Somatic.Status == "Matched") |> 
+        filter(FST.Group == group) |> 
+        nrow()
+
+    all_diff_cytoands |> 
+        filter(fisher_p < 0.05) |> 
+        filter(group_comparison == "U-DFSP_vs_Pre-FST")
+
+    ## Get the peak coordinates
+    peaks_data <- GetPCGRGisticOverlap2(
+        peak_label = peak_label,
+        pcgr_cna_data = pcgr_cna_tbl, 
+        gistic_score_data = gistic_score,
+        min_overlap = 0.1
+    )
+
+    peaks_data <- AddPeaksPCGRCountData(
+        peaks_data,
+        pcgr_cna_data = pcgr_cna_tbl,
+        var = "FST.Group",
+        group = group,
+        is_somatic_matched = TRUE
+    )
+
+    ## Plot the enriched regions
+    plots[[group]] <- GisticChromPlot(
+        data = gistic_score,
+        peaks_data = peaks_data,
+        y_lim = c(-3, 1),
+        x_expand = c(0.02, 0),
+        title = paste0(group, " (", n_samples, ")"),
+        show_horizontal_grid = TRUE,
+        show_vertical_grid = TRUE,
+        grid_line_type = "dotted",
+        grid_line_color = "grey80",
+        grid_line_alpha = 0.5,
+        grid_line_width = 0.2,
+        show_chromosome_ideogram = FALSE,
+        ideogram_label_size = 4,
+        rel_heights = c(4, 0.3)
+    )
+}
+
+SavePlot(
+    plot = wrap_plots(plots, ncol = 2) +
+        plot_layout(guides = "collect"),
+    width = 12,
+    height = 5,
+    dir = "figures/gistic2",
+    filename = "wes_facet_pcgr_DFSP_cohort_gistic_plots_FST.Group"
+)
 
 ## "========================================================================="
 ## Differentially mutated and shared genes across groups
@@ -409,7 +524,6 @@ total_cohort_size <- clinical_info |>
 ## genes freq data in entire cohort
 data |>
     filter(symbol %in% cnv_oncoplot_genes)
-
 
 oncoplot_data <- data |>
     filter(symbol %in% cnv_oncoplot_genes) |>

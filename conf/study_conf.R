@@ -40,3 +40,10 @@ group_comparisons <- list(
         name = "U-DFSP+Pre-FST_vs_Post-FST+FS-DFSP"
     )
 )
+
+subtype_FST <- c(
+    "U-DFSP",
+    "Pre-FST",
+    "Post-FST",
+    "FS-DFSP"
+)
