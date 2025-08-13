@@ -13,16 +13,18 @@ source "$(dirname "${BASH_SOURCE[0]}")/conf/config.sh"
 # Activate the conda environment
 conda activate gistic2
 
+export GISTIC2_REFERENCE="/mnt/f/Reference/GISTIC2/hg38.UCSC.add_miR.160920.refgene.mat"
+
 # export GISTIC2_DIR="/mnt/f/projects/250224_sarcoma_multiomics/data/wes/GISTIC2/somatic_matched_removed_neutral"
 # export GISTIC2_DIR="/mnt/f/projects/250224_sarcoma_multiomics/data/wes/GISTIC2/somatic_unmatched"
-export GISTIC2_DIR="/mnt/f/projects/250224_sarcoma_multiomics/data/epic/GISTIC2"
-export GISTIC2_REFERENCE="/mnt/f/Reference/GISTIC2/hg38.UCSC.add_miR.160920.refgene.mat"
+export GISTIC2_DIR="/mnt/f/projects/250224_sarcoma_multiomics/data/temp/GISTIC2"
 
 ## create output directory if it does not exist
 mkdir -p "$GISTIC2_DIR"
 
 ## Test file
 # segment_file="/mnt/f/projects/sarcoma_multiomics/data/wes/GISTIC2/FS-DFSP/FS-DFSP.tsv"
+segment_file="/mnt/f/projects/250224_sarcoma_multiomics/data/temp/GISTIC2/FGFR_mskimpact_segments/FGFR_mskimpact_segments.tsv"
 
 # Function to run GISTIC2 on one file
 run_gistic2() {
@@ -44,7 +46,7 @@ run_gistic2() {
         -b "${output_dir}" \
         -seg "${segment_file}" \
         -refgene "${GISTIC2_REFERENCE}" \
-        -qvt 0.1 \
+        -qvt 0.5 \
         -ta 0.3 \
         -td 0.3 \
         -conf 0.99 \

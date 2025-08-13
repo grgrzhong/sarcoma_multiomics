@@ -1962,13 +1962,28 @@ ConvertPCGRToMaftools <- function(pcgr_tbl) {
 
 LoadClinicalInfo <- function() {
 
-    file <- "data/clinical/DFSP_WES_clinical.csv"
+    wes_file <- "data/clinical/DFSP_WES_clinical.csv"
 
-    clinical_info <- read_csv(here(file), show_col_types = FALSE) |> 
+    clinical_info <- read_csv(
+        here(wes_file), 
+        show_col_types = FALSE
+    ) |> 
         mutate(
             Tumor_Sample_Barcode = Sample.ID
         )
     
+    ## Combine the Epic Meth group data
+    meth_file <- here("data/clinical/phenoData_DFSP_allTumour_CNV_Meth.csv")
+    meth_data <- read_csv(
+        file = meth_file, 
+        show_col_types = FALSE
+    ) |> 
+        select(Sample.ID, Meth.Subtype.Main.2Class) |> 
+        filter(!is.na(Meth.Subtype.Main.2Class))
+
+    clinical_info <- clinical_info |> 
+        left_join(meth_data, by = "Sample.ID")
+
     # unique(clinical_info$FST.Group)
     # clinical_info <- clinical_info |> 
     #     mutate(
@@ -4096,7 +4111,9 @@ GetPCGRCNVGroupDiffGene <- function(
     somatic_matched = TRUE,
     group1 = "U-DFSP",
     group2 = "FS-DFSP",
-    p_adjust_method = "BH",
+    p_adjust_method = "BH", # c("holm", "hochberg", "hommel", "bonferroni", "BH", "BY",
+#   "fdr", "none")
+    min_altered_samples = 3,
     group_comparison = "U-DFSP_vs_FS-DFSP"
 ) {
 
@@ -4106,56 +4123,57 @@ GetPCGRCNVGroupDiffGene <- function(
             filter(event_type %in% {{event_type}})
     }
 
-    ## We should use the total cohort size as the denominator for frequency calculations
-    ## as we are answer the question "What proportion of samples have this alteration in my cohort?"
-    clinical_info <- LoadClinicalInfo()
+    ## We should use the total cohort size as the denominator for frequency 
+    ## calculations as we are answer the question "What proportion of samples 
+    ## have this alteration in my cohort?"
     
     if (somatic_matched) {
 
-        sample_ids <- clinical_info |> 
-            filter(Somatic.Status == "Matched") |> 
-            pull(Sample.ID)
-        
-        total_sample <- length(sample_ids)
+        clinical_info <- LoadClinicalInfo() |> 
+            filter(Somatic.Status == "Matched")
 
     } else {
 
-        sample_ids <- clinical_info |> 
-            pull(Sample.ID)
-
-        total_sample <- length(sample_ids)
+        clinical_info <- LoadClinicalInfo()
 
     }
-
-    message(paste(" - Total samples:", total_sample))
-
-    data <- data |> filter(sample_id %in% sample_ids)
-
-    ## Get samples in each group
-    group1_samples <- data |> 
-        filter(!!sym(var) %in% group1) |> 
-        pull(sample_id) |> 
-        unique()
-
-    group2_samples <- data |> 
-        filter(!!sym(var) %in% group2) |> 
-        pull(sample_id) |> 
-        unique()
-
-    message(paste(" - Group 1 samples:", length(group1_samples)))
-    message(paste(" - Group 2 samples:", length(group2_samples)))
     
+    ## Total samples of each group in cohort
+    n_sample <- nrow(clinical_info)
+    
+    n_group1 <- clinical_info |> 
+        filter(!!sym(var) %in% c(group1)) |> 
+        nrow()
+    
+    n_group2 <- clinical_info |> 
+        filter(!!sym(var) %in% c(group2)) |> 
+        nrow()
+
     ## Calculate gene alteration frequencies
-    gene_stats <- data |>
+    freq_data <- data |>
         filter(!!sym(var) %in% c(group1, group2)) |> 
+        select(sample_id, symbol, !!sym(cn_column), !!sym(var)) |>
+        distinct() |> 
         group_by(symbol, !!sym(cn_column)) |> 
         summarise(
-            group1_altered = sum(sample_id %in% group1_samples),
-            group1_total = length(group1_samples),
-            group2_altered = sum(sample_id %in% group2_samples),
-            group2_total = length(group2_samples),
-            total_altered = n_distinct(sample_id),
+            group1_altered = sum(!!sym(var) %in% group1),
+            group1_total = n_group1,
+            group2_altered = sum(!!sym(var) %in% group2),
+            group2_total = n_group2,
+            total_altered = group1_altered + group2_altered,
             .groups = "drop"
+        ) |>
+        arrange(desc(total_altered)) |>
+        ## Add back gene-specific summary statistics
+        left_join(
+            data |> 
+                group_by(symbol, !!sym(cn_column)) |>
+                summarise(
+                    mean_segment_size = mean(segment_length_mb, na.rm = TRUE),
+                    n_cytobands_affected = n_distinct(cytoband),
+                    .groups = "drop"
+                ),
+            by = c("symbol", cn_column)
         ) |> 
         ## Calculate frequencies
         mutate(
@@ -4163,10 +4181,13 @@ GetPCGRCNVGroupDiffGene <- function(
             group2_freq = group2_altered / group2_total,
             freq_diff = group2_freq - group1_freq
         ) |> 
-        ## Filter genes with sufficient alterations
+        arrange(desc(freq_diff))
+
+    ## Filter genes with sufficient alterations
+    freq_data |> 
         dplyr::filter(
-            total_altered >=3, # At least 3 total alterations
-            (group1_altered >=2 | group2_altered >=2)
+            total_altered >= min_altered_samples,
+            (group1_altered >= min_altered_samples | group2_altered >= min_altered_samples)
         ) |> 
         ## Perform Fisher's exact test
         rowwise() |>
@@ -4184,7 +4205,7 @@ GetPCGRCNVGroupDiffGene <- function(
                 rownames(contingency_table) <- c("Group1", "Group2")
                 fisher.test(contingency_table)$p.value
             },
-            fisher_adds_ratio = {
+            fisher_odds_ratio = {
                 contingency_table <- matrix(
                     c(
                         group1_altered, group1_total - group1_altered,
@@ -4199,20 +4220,20 @@ GetPCGRCNVGroupDiffGene <- function(
             }
         ) |> 
         ungroup() |> 
-        ## Add FDR correction
+        ## Adjust for multiple testing
         mutate(
             fisher_q = p.adjust(fisher_p, method = p_adjust_method),
-            significantly_different = fisher_q < 0.05,
+            sig_diff = fisher_q < 0.05,
             enriched_in_group2 = fisher_q < 0.05 & 
-                fisher_adds_ratio > 1 & freq_diff > 0,
+                fisher_odds_ratio > 1 & freq_diff > 0,
             depleted_in_group2 = fisher_q < 0.05 & 
-                fisher_adds_ratio < 1 & freq_diff < 0
+                fisher_odds_ratio < 1 & freq_diff < 0
         ) |> 
-        arrange(fisher_q, desc(abs(freq_diff)))
-    
-    ## Return
-    gene_stats |> 
-        mutate(group_comparison = {{group_comparison}})
+        arrange(fisher_q, desc(abs(freq_diff))) |> 
+        mutate(
+            group_comparison = {{group_comparison}},
+            .before = "symbol"
+        )
 }
 
 GetPCGRCNVGroupShareGene <- function(
@@ -4251,13 +4272,12 @@ GetPCGRCNVGroupShareGene <- function(
         total_sample <- length(sample_ids)
 
     }
-
-    message(paste(" - Total samples:", total_sample))
-
+    
     data <- data |> filter(sample_id %in% sample_ids)
 
     ## Calculate gene frequencies
     gene_group_freq <- data |>
+        distinct(sample_id, symbol, !!sym(cn_column), !!sym(var)) |>
         group_by(symbol, !!sym(var), !!sym(cn_column)) |>
         summarise(
             n_samples_altered = n_distinct(sample_id),
@@ -4268,39 +4288,36 @@ GetPCGRCNVGroupShareGene <- function(
             data |>
             group_by(!!sym(var)) |>
             summarise(
-                total_samples = n_distinct(sample_id),
+                group_total_samples = n_distinct(sample_id),
                 .groups = "drop"
             ),
             by = var
         ) |> 
         mutate(
-            freq = n_samples_altered / total_samples,
+            group_freq = n_samples_altered / group_total_samples,
+            cohort_freq = n_samples_altered / total_sample,
             gene_alteration = paste0(symbol, "_", !!sym(cn_column))
         ) |> 
-        filter(freq >= min_freq_per_group)
+        filter(group_freq >= min_freq_per_group)
 
     ## identify genes present in multiple groups
     shared_genes <- gene_group_freq |> 
         group_by(gene_alteration, symbol, !!sym(cn_column)) |>
         summarise(
             n_groups_present = n(),
-            groups_present = paste(!!sym(var), collapse = ", "),
-            mean_freq = mean(freq),
-            min_freq = min(freq),
-            max_freq = max(freq),
-            range_freq = max_freq - min_freq,
+            groups_present_freq = paste(
+                paste0(!!sym(var), "(", round(group_freq, 2), ")"), collapse = ", "
+            ),
             .groups = "drop"
         ) |> 
         filter(n_groups_present >= min_groups_present) |> 
-        arrange(desc(n_groups_present), desc(mean_freq)) 
-
-    summary <- shared_genes |> 
-        left_join(
-            gene_group_freq,
-            by = c("gene_alteration", "symbol", cn_column)
-        )
-
-    summary
+        arrange(desc(n_groups_present)) 
+    
+    ## Return
+    list(
+        shared_genes = shared_genes,
+        gene_group_freq = gene_group_freq
+    )
 }
 
 GetPCGRCNVGroupDiffCytoband <- function(
@@ -4488,16 +4505,17 @@ GetPCGRCNVGroupShareCytoband <- function(
             data |>
             group_by(!!sym(var)) |>
             summarise(
-                total_samples = n_distinct(sample_id),
+                group_total_samples = n_distinct(sample_id),
                 .groups = "drop"
             ),
             by = var
         ) |> 
         mutate(
-            freq = n_samples_altered / total_samples,
+            group_freq = n_samples_altered / group_total_samples,
+            cohort_freq = n_samples_altered / total_sample,
             cytoband_alteration = paste0(cytoband, "_", !!sym(cn_column))
         ) |> 
-        filter(freq >= min_freq_per_group)
+        filter(group_freq >= min_freq_per_group)
 
     ## identify genes present in multiple groups
     shared_cytobands <- cytoband_group_freq |> 
@@ -4505,7 +4523,7 @@ GetPCGRCNVGroupShareCytoband <- function(
         summarise(
             n_groups_present = n(),
             groups_present_freq = paste(
-                paste0(!!sym(var), "(", round(freq, 2), ")"), collapse = ", "
+                paste0(!!sym(var), "(", round(group_freq, 2), ")"), collapse = ", "
             ),
             # freq = ,
             .groups = "drop"
@@ -4520,7 +4538,7 @@ GetPCGRCNVGroupShareCytoband <- function(
     )
 }
 
-GenerateCytobandOncoplot <- function(
+PCGRComplexOncoplot <- function(
     mat,
     sample_annotation = c("FST.Group", "Metastasis"),
     sample_sorted_by = "FST.Group",
@@ -4701,11 +4719,20 @@ GenerateCytobandOncoplot <- function(
         file <- here(dir, paste0(filename, img))
         
         if (img == ".pdf") {
+
+            # CairoPDF(file, width = width, height = height)
             pdf(file, width = width, height = height)
     
         } else if (img == ".png") {
     
-            png(file, width = width, height = height, res = 300, units = "in")
+            # CairoPNG(
+            #     file, width = width, height = height, res = 300, units = "in",
+            #     fonts = "Arial"
+            # )
+            png(
+                file, width = width, height = height, res = 600, units = "in",
+                fonts = "Arial"
+            )
         }
         
         draw(
@@ -4749,6 +4776,8 @@ GisticChromPlot <- function(
     title = NULL,
     x_lab = NULL,
     y_lab = "G-Score",
+    is_log_score = FALSE,
+    log_base = 10,
     show_horizontal_grid = TRUE,
     show_vertical_grid = TRUE,
     grid_line_type = "dotted",
@@ -4788,6 +4817,18 @@ GisticChromPlot <- function(
     data$StartPos <- data$Start + chrom_info$chormStartPosFrom0[chromID]
     data$EndPos <- data$End + chrom_info$chormStartPosFrom0[chromID]
 
+    pseudocount <- 0.01
+
+    ## Apply log transformation
+    if (is_log_score) {
+        
+        data <- data |> 
+            mutate(
+                G.score = sign(G.score) * 
+                    log10(abs(G.score) + pseudocount), base = log_base
+            )
+    }
+
     ## Convert the to Del to be negative
     data[data$Type == "Del", "G.score"] <- data[data$Type == "Del", "G.score"] * -1
 
@@ -4795,6 +4836,7 @@ GisticChromPlot <- function(
     ## Process peaks data if provided
     ## "--------------------------------------------------------------------"
     if (!is.null(peaks_data) && nrow(peaks_data) > 0) {
+        
         # Add positional information to peaks using the same coordinate system
         peaks_data$StartPos <- peaks_data$Start + chrom_info$chormStartPosFrom0[peaks_data$Chromosome]
         peaks_data$EndPos <- peaks_data$End + chrom_info$chormStartPosFrom0[peaks_data$Chromosome]
@@ -4826,10 +4868,34 @@ GisticChromPlot <- function(
         y_lim <- c(y_range[1] - y_padding, y_range[2] + y_padding)
 
         ## Use the integer for y lim
+        y_lim <- round(y_lim)     
+    }
+
+    ## Determine y-axis limits if not provided
+    if (is.null(y_lim)) {
+        y_range <- range(data$G.score, na.rm = TRUE)
+        y_padding <- diff(y_range) * 0.1
+        y_lim <- c(y_range[1] - y_padding, y_range[2] + y_padding)
+
+        # Expand y_lim to accommodate peak labels if peaks_data exists
+        if (!is.null(peaks_data) && nrow(peaks_data) > 0) {
+            label_range <- range(peaks_data$label_y, na.rm = TRUE)
+            y_lim[1] <- min(y_lim[1], label_range[1] - 0.1)
+            y_lim[2] <- max(y_lim[2], label_range[2] + 0.1)
+        }
+
+        # Round appropriately based on log transformation
+        if (is_log_score) {
+            y_lim <- round(y_lim, 1)  # More precision for log scale
+        } else {
+            y_lim <- round(y_lim)     # Integer for original scale
+        }
+
+        # ## Use the integer for y lim
         y_lim <- round(y_lim)
         
     }
-    
+
     y_breaks <- pretty(y_lim, n = y_lim[2] - y_lim[1])
     x_lim <- c(0, max(chrom_info$chromlengthCumsum))
     
@@ -4855,7 +4921,7 @@ GisticChromPlot <- function(
                 linetype = grid_line_type, 
                 color = grid_line_color, 
                 alpha = grid_line_alpha,
-                size = grid_line_width
+                linewidth = grid_line_width
             )
     }
 
@@ -4876,14 +4942,13 @@ GisticChromPlot <- function(
                 linetype = grid_line_type, 
                 color = grid_line_color, 
                 alpha = grid_line_alpha,
-                size = grid_line_width
+                linewidth = grid_line_width
             )  
     }
     
     ## "--------------------------------------------------------------------"
     ## Add peak labels if peaks_data is provided
     ## "--------------------------------------------------------------------"
-
     if (!is.null(peaks_data) && nrow(peaks_data) > 0) {
         plot <- plot +
             # Add peak points
@@ -5078,7 +5143,7 @@ GetPCGRGisticOverlap <- function(
     ## peak labels pcgr cytoband data
     
     ## Get the coordinate for each peak labels
-    peak_data <- list()
+    peaks_data <- list()
     
     for (i in peak_label) {
         
@@ -5145,7 +5210,7 @@ GetPCGRGisticOverlap <- function(
         }
 
         ## Create overlapped data and summarize by cytoband
-        peak_data[[i]] <- data[queryHits(valid_overlaps), ] |>
+        peaks_data[[i]] <- data[queryHits(valid_overlaps), ] |>
             bind_cols(
                 gistic_score_data[
                     subjectHits(valid_overlaps), 
@@ -5168,7 +5233,7 @@ GetPCGRGisticOverlap <- function(
             )
     }
 
-    list_rbind(peak_data)
+    list_rbind(peaks_data)
 }
 
 GetPCGRGisticOverlap2 <- function(
@@ -5179,8 +5244,8 @@ GetPCGRGisticOverlap2 <- function(
     overlap_method = "any"  # "any", "pcgr_based", "gistic_based", "reciprocal"
 ) {
     
-     ## Get the coordinate for each peak labels
-    peak_data <- list()
+    ## Get the coordinate for each peak labels
+    peaks_data <- list()
     successful_peaks <- character()
     failed_peaks <- character()
     
@@ -5313,7 +5378,7 @@ GetPCGRGisticOverlap2 <- function(
             filter(!is.na(mean_gistic_score))  # Remove peaks with no valid GISTIC scores
 
         if (nrow(peak_result) > 0) {
-            peak_data[[i]] <- peak_result
+            peaks_data[[i]] <- peak_result
             successful_peaks <- c(successful_peaks, i)
         } else {
             failed_peaks <- c(failed_peaks, i)
@@ -5321,22 +5386,22 @@ GetPCGRGisticOverlap2 <- function(
     }
 
     ## Print summary
-    message(paste("Successfully processed", length(successful_peaks), "peaks"))
-    message(paste("Failed to process", length(failed_peaks), "peaks"))
+    message(paste(" - Successfully processed", length(successful_peaks), "peaks"))
+    message(paste(" - Failed to process", length(failed_peaks), "peaks"))
     
     if (length(failed_peaks) > 0) {
-        message("Failed peaks: ", paste(failed_peaks[1:min(5, length(failed_peaks))], collapse = ", "))
+        message(" - Failed peaks: ", paste(failed_peaks[1:min(5, length(failed_peaks))], collapse = ", "))
         if (length(failed_peaks) > 5) {
-            message("... and", length(failed_peaks) - 5, "more")
+            message(" - ... and", length(failed_peaks) - 5, "more")
         }
     }
 
-    if (length(peak_data) == 0) {
+    if (length(peaks_data) == 0) {
         warning("No valid peak data found for any peaks")
         return(tibble())
     }
 
-    result <- list_rbind(peak_data)
+    result <- list_rbind(peaks_data)
     return(result)
 }
 
