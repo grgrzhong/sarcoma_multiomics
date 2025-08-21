@@ -1,3 +1,10 @@
+#!/usr/bin/env Rscript
+##############################################################################
+## Description: R libraries for data analysis and visualization
+## Author:  Zhong Guorui
+## Created: 2025-02-17
+##############################################################################
+
 ## Load required libraries
 suppressPackageStartupMessages(
     suppressWarnings({
@@ -15,6 +22,11 @@ suppressPackageStartupMessages(
         library(Cairo)
         library(patchwork)
         library(cowplot)
+        library(maftools)
+        library(circlize)
+        library(ComplexHeatmap)
+        library(reshape2)
+        library(sigminer)
         library(tidyverse)
     })
 )
@@ -1488,8 +1500,8 @@ addDFSPGroupInfo <- function(maf_tbl) {
     maf_tbl
 }
 
-CollectPCGRCNAData <- function(
-    dir, 
+CollectPCGRCNVData <- function(
+    dir = "data/wes/PCGR", 
     sig_gain_thres = NULL
 ) {
 
@@ -1505,19 +1517,24 @@ CollectPCGRCNAData <- function(
     ## Loop through the files and read the data
     for (file in pcgr_files) {
 
-        message(" - Processing file: ", file)
+        message(" - Processing: ", file)
         
         if (!file.exists(file)) {
             warning("File does not exist: ", file)
             next
         }
 
-        cna_data <- read_tsv(file, show_col_types = FALSE) |> 
+        cna_data <- read_tsv(file, show_col_types = FALSE) |>
+            clean_names() |> 
             mutate(
-                total_cn = CN_MAJOR + CN_MINOR,
-                .after = CN_MINOR
+                total_cn = cn_major + cn_minor,
+                .after = cn_minor
             )
         
+        # cna_data |> 
+        #     select(sample_id, var_id, cn_major, cn_minor, variant_class) |>
+        #     distinct()
+
         # if (!is.null(sig_gain_thres)) {
         #     cna_data <- cna_data |>
         #         filter(total_cnv >=4 | total_cnv == 0)
@@ -1527,14 +1544,14 @@ CollectPCGRCNAData <- function(
 
     }
     
-    cna_tbl <- list_rbind(cna_list) |> janitor::clean_names()
+    cna_tbl <- list_rbind(cna_list)
 
     ## Return
     cna_tbl
 }
 
 CollectPCGRSNVINDELData <- function(
-    dir, 
+    dir = "data/wes/PCGR", 
     sheet_name="SOMATIC_SNV_INDEL"
 ) {
     
@@ -1555,37 +1572,55 @@ CollectPCGRSNVINDELData <- function(
     )
     
     ## Get the sample names from the file names
-    pcgr_samples <- pcgr_files |> 
-        path_file() |> 
-        str_remove(".pcgr.grch38.xlsx")
+    # pcgr_samples <- pcgr_files |> 
+    #     path_file() |> 
+    #     str_remove(".pcgr.grch38.xlsx")
     
-    message("Collecting PCGR data from ", length(pcgr_files), " files")
+    # message("Collecting PCGR data from ", length(pcgr_files), " files")
 
-    ## Load all data from PCGR files
-    pcgr_data <- tibble(
-        sample = pcgr_samples,
-        file = pcgr_files
-    ) |>
-        mutate(
-            data = map2(
-                file,
-                sample,
-                \(f, s) {
-                    message("Processing sample = ", s)
-                    read_xlsx(f, sheet = sheet_name)
-                },
-                .progress = TRUE
-            )
-        ) |> 
-        unnest(data) |> 
-        select(-sample, -file) |> 
-        janitor::clean_names()
+    # # Load all data from PCGR files
+    # pcgr_data <- tibble(
+    #     sample = pcgr_samples,
+    #     file = pcgr_files
+    # ) |>
+    #     mutate(
+    #         data = map2(
+    #             file,
+    #             sample,
+    #             \(f, s) {
+    #                 message(" - Processing sample = ", s)
+    #                 read_xlsx(f, sheet = sheet_name)
+    #             },
+    #             .progress = TRUE
+    #         )
+    #     ) |> 
+    #     unnest(data) |> 
+    #     select(-sample, -file) |> 
+    #     janitor::clean_names()
     
+    data_list <- list()
+    ## Loop through the files and read the data
+    for (file in pcgr_files) {
+
+        message(" - Processing: ", file)
+        
+        if (!file.exists(file)) {
+            warning("File does not exist: ", file)
+            next
+        }
+
+        data_list[[file]] <- read_xlsx(file, sheet = sheet_name) |>
+            janitor::clean_names()
+
+    }
+    
+    data <- list_rbind(data_list)
+
     ## Return
-    pcgr_data
+    data
 }
 
-filterPCGRData <- function(
+FilterPCGRSNVIndels <- function(
     pcgr_data,
     min_dp_tumor = 20,
     min_vaf_tumor = 0.05,
@@ -1960,7 +1995,7 @@ ConvertPCGRToMaftools <- function(pcgr_tbl) {
 
 }
 
-LoadClinicalInfo <- function() {
+LoadClinicalInfo <- function(is_somatic_matched = TRUE) {
 
     wes_file <- "data/clinical/DFSP_WES_clinical.csv"
 
@@ -1976,7 +2011,8 @@ LoadClinicalInfo <- function() {
     meth_file <- here("data/clinical/phenoData_DFSP_allTumour_CNV_Meth.csv")
     meth_data <- read_csv(
         file = meth_file, 
-        show_col_types = FALSE
+        show_col_types = FALSE,
+        name_repair = "unique_quiet"
     ) |> 
         select(Sample.ID, Meth.Subtype.Main.2Class) |> 
         filter(!is.na(Meth.Subtype.Main.2Class))
@@ -1993,7 +2029,12 @@ LoadClinicalInfo <- function() {
     #             # ordered = TRUE
     #         )
     #     )
-    
+
+    if (is_somatic_matched) {
+        clinical_info <- clinical_info |> 
+            filter(Somatic.Status == "Matched")
+    }
+
     clinical_info
 }
 
@@ -2196,7 +2237,7 @@ LoadSampleGroupInfo <- function(is_somatic_matched = FALSE) {
     ## The column "Metastasis", it means whether the patient has metastasis, 
     ## but the same patient can have samples coming from 
     ## primary site or metastatic site
-    ## Patient level Metastasis
+    ## Case level metastasis
     Meta <- clinical_info |> filter(Metastasis == "Yes") |> pull(Sample.ID)
 
     `Non-Meta` <- clinical_info |> filter(Metastasis == "No") |> pull(Sample.ID)
@@ -3273,12 +3314,12 @@ GetGistic2CytobandStatRes <- function(
 ) {
 
     ## Load GISTIC data in maftools objects
-    g1_obj <- LoadGistic2Data(
+    g1_obj <- LoadGisticData(
         gistic_dir = gistic_dir,
         group = group1
     )
 
-    g2_obj <- LoadGistic2Data(
+    g2_obj <- LoadGisticData(
         gistic_dir = gistic_dir,
         group = group2
     )
@@ -4080,17 +4121,46 @@ GenerateCytobandOncoplot <- function(
 
 }
 
-LoadGistic2Data <- function(
+LoadGisticData <- function(
     gistic_dir,
-    group
+    group,
+    gistic_qval_thres = 0.5
 ) {
     
     ## Load GISTIC data in maftools objects
+    gisticAllLesionsFile <- here(
+        gistic_dir, 
+        group, 
+        paste0("qval_", gistic_qval_thres),
+        "all_lesions.conf_99.txt"
+    )
+
+    gisticAmpGenesFile <- here(
+        gistic_dir,
+        group,
+        paste0("qval_", gistic_qval_thres),
+        "amp_genes.conf_99.txt"
+    )
+
+    gisticDelGenesFile <- here(
+        gistic_dir,
+        group,
+        paste0("qval_", gistic_qval_thres),
+        "del_genes.conf_99.txt"
+    )
+    
+    gisticScoresFile <- here(
+        gistic_dir,
+        group,
+        paste0("qval_", gistic_qval_thres),
+        "scores.gistic"
+    )
+
     gistic_obj <- readGistic(
-        gisticAllLesionsFile = here(gistic_dir, group, "all_lesions.conf_99.txt"),
-        gisticAmpGenesFile = here(gistic_dir, group, "amp_genes.conf_99.txt"),
-        gisticDelGenesFile = here(gistic_dir, group, "del_genes.conf_99.txt"),
-        gisticScoresFile = here(gistic_dir, group, "scores.gistic"),
+        gisticAllLesionsFile = gisticAllLesionsFile,
+        gisticAmpGenesFile = gisticAmpGenesFile,
+        gisticDelGenesFile = gisticDelGenesFile,
+        gisticScoresFile = gisticScoresFile,
         verbose = FALSE
     )
 
@@ -4102,6 +4172,9 @@ LoadGistic2Data <- function(
     ## Return
     gistic_obj
 }
+
+
+
 
 GetPCGRCNVGroupDiffGene <- function(
     data,
@@ -4327,11 +4400,11 @@ GetPCGRCNVGroupDiffCytoband <- function(
     event_type = NULL,
     somatic_matched = TRUE,
     group1 = "U-DFSP",
-    group2 = "FS-DFSP",
+    group2 = "Pre-FST",
     p_adjust_method = "BH", # c("holm", "hochberg", "hommel", "bonferroni", "BH", "BY",
 #   "fdr", "none")
     min_altered_samples = 3,
-    group_comparison = "U-DFSP_vs_FS-DFSP"
+    group_comparison = "U-DFSP_vs_Pre-FST"
 ) {
 
     ## Filter by event type
@@ -4372,26 +4445,15 @@ GetPCGRCNVGroupDiffCytoband <- function(
         select(sample_id, cytoband, !!sym(cn_column), !!sym(var)) |>
         distinct() |> 
         group_by(cytoband, !!sym(cn_column)) |> 
-        summarise(
+        summarise (
             group1_altered = sum(!!sym(var) %in% group1),
-            group1_total = n_group1,
             group2_altered = sum(!!sym(var) %in% group2),
+            group1_total = n_group1,
             group2_total = n_group2,
-            total_altered = group1_altered + group2_altered,
             .groups = "drop"
         ) |>
+        mutate(total_altered = group1_altered + group2_altered) |> 
         arrange(desc(total_altered)) |>
-        ## Add back summary statistics
-        left_join(
-            data |> 
-                group_by(cytoband, !!sym(cn_column)) |>
-                summarise(
-                    mean_segment_size = mean(segment_length_mb, na.rm = TRUE),
-                    n_genes_affected = n_distinct(symbol),
-                    .groups = "drop"
-                ),
-            by = c("cytoband", cn_column)
-        ) |> 
         ## Calculate frequencies
         mutate(
             group1_freq = group1_altered / group1_total,
@@ -4765,6 +4827,407 @@ PCGRComplexOncoplot <- function(
     # message(
     #     paste0("Saved oncoplot: ", file)
     # )
+
+}
+
+GisticComplexOncoplot <- function(
+    mat,
+    sample_annotation = c("FST.Group", "Metastasis"),
+    sample_sorted_by = "FST.Group",
+    sample_sorted_level = c(
+        "U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP"
+    ),
+    column_title = NULL,
+    width = 18,
+    height = 12,
+    dir = "figures/oncoplot",
+    filename = "oncoplot"
+) {
+    
+    ## Get matched clinical info
+    clinical_info <- LoadClinicalInfo(is_somatic_matched = FALSE)
+    
+    sample_idx <- match(
+        colnames(mat), 
+        clinical_info$Sample.ID
+    )
+    
+    ## Sort samples
+    if (!is.null(sample_sorted_by) && !is.null(sample_sorted_level)) {
+
+        # data |> 
+        #     left_join(
+        #         clinical_info  |> select(Sample.ID, all_of(sample_sorted_by)), 
+        #         by = "Sample.ID"
+        #     ) |>
+        #     group_by(FST.Group)
+        #     arrange()
+
+        sample_order <- clinical_info[sample_idx, ] |> 
+            # group_by(across(all_of(sample_sorted_by))) |>
+            mutate(
+                sample_order = factor(
+                    !!sym(sample_sorted_by), 
+                    levels = sample_sorted_level
+                )
+            ) |>
+            group_by(sample_order) |>
+            arrange(!!sym(sample_sorted_by), Sample.ID, .by_group = TRUE) |> 
+            select(Sample.ID, all_of(sample_sorted_by), sample_order) |> 
+            pull(Sample.ID)
+
+    } else {
+
+        ## Sort by patient
+        sample_order <- colnames(mat)
+    }
+
+    sort_mat <- mat[, sample_order]
+    
+    ## Sample annotations
+    sort_sample_idx <- match(
+        sample_order, 
+        clinical_info$Sample.ID
+    )
+
+    sample_annotation_df <- clinical_info[sort_sample_idx, ] |> 
+        select(Sample.ID, all_of(sample_annotation)) |> 
+        column_to_rownames("Sample.ID")
+
+    ## Define colors for the sample annotations
+    sample_annotation_colors <- list()
+
+    for (annotation in sample_annotation) {
+        sample_annotation_colors[[annotation]] <- study_colors[[annotation]]
+    }
+
+    ## Create the matrix annotation colors
+    alterations <- c("Amp", "Del")
+    # sort_mat |> as_tibble(rownames = "cytoband") |> 
+    #     pivot_longer(
+    #         cols = -cytoband, 
+    #         names_to = "Sample.ID", 
+    #         values_to = "alteration"
+    #     ) |> 
+    #     pull(alteration) |> 
+    #     unique()
+
+    ## Get the matched alteration colors
+    alteration_colors <- c()
+    
+    for (i in alterations) {
+        alteration_colors <- c(alteration_colors, study_colors$gistic_cn_class[i])
+    }
+
+    alter_fun <- list(
+        background = alter_graphic("rect", fill = "#CCCCCC"),
+        Amp = alter_graphic("rect", fill = alteration_colors[["Amp"]]),
+        Del = alter_graphic("rect", fill = alteration_colors[["Del"]])
+    )
+
+    ## Plot the oncoprint
+    oncoplot <- oncoPrint(
+        sort_mat,
+        alter_fun = alter_fun,
+        col = alteration_colors,
+        
+        bottom_annotation = HeatmapAnnotation(
+            df = sample_annotation_df,
+            col = sample_annotation_colors,
+            annotation_height = unit(c(5, 5), "mm"),
+            annotation_name_gp = gpar(fontsize = 8)
+        ),
+
+        show_pct = TRUE,
+        pct_digits = 0,
+        pct_side = "right",
+
+        show_row_names = TRUE,
+        row_names_side = "left",
+        row_names_gp = gpar(fontsize = 6),
+        # row_title = "Cytobands (Most Frequent → Least Frequent)",
+
+        column_title = column_title,
+        show_column_names = TRUE,
+        column_names_gp = gpar(fontsize = 6),
+        
+        column_order = sample_order,
+        # Add frequency annotation on the right
+        # right_annotation = rowAnnotation(
+        #     Frequency = anno_barplot(
+        #         cytoband_freq$alteration_frequency[
+        #             match(rownames(oncoplot_matrix_sorted), cytoband_freq$matched_cytoband)
+        #         ],
+        #         bar_width = 1,
+        #         gp = gpar(fill = "#666666"),
+        #         axis_param = list(side = "bottom", labels_rot = 0)
+        #     ),
+        #     annotation_width = unit(2, "cm")
+        # ),
+        
+        heatmap_legend_param = list(
+            title = "CNV Alteration"
+            # labels = c(
+            #     "Homozygous Deletion", 
+            #     "Heterozygous Deletion", 
+            #     "Gain", 
+            #     "No Alteration"
+            # )
+        )
+    )
+
+    ## Save the oncoplot
+    dir_create(here(dir))
+    img_type <- c(".pdf", ".png")
+    
+    for (img in img_type) {
+        
+        file <- here(dir, paste0(filename, img))
+        
+        if (img == ".pdf") {
+
+            # CairoPDF(file, width = width, height = height)
+            pdf(file, width = width, height = height)
+    
+        } else if (img == ".png") {
+    
+            # CairoPNG(
+            #     file, width = width, height = height, res = 300, units = "in",
+            #     fonts = "Arial"
+            # )
+            png(
+                file, width = width, height = height, res = 600, units = "in",
+                fonts = "Arial"
+            )
+        }
+        
+        draw(
+            oncoplot,
+            heatmap_legend_side = "right",
+            annotation_legend_side = "right",
+            merge_legends = TRUE,
+            padding = unit(c(1, 1, 1, 1), "cm")
+        )
+
+        dev.off()
+
+        message(
+            paste0("Saved oncoplot: ", file)
+        )
+    }
+    # file <- here(dir, paste0(filename, ".pdf"))
+    # pdf(file, width = width, height = height)
+
+    # draw(
+    #     oncoplot,
+    #     heatmap_legend_side = "right",
+    #     annotation_legend_side = "right",
+    #     merge_legends = TRUE,
+    #     padding = unit(c(1, 1, 1, 1), "cm")
+    # )
+
+    # dev.off()
+
+    # message(
+    #     paste0("Saved oncoplot: ", file)
+    # )
+
+}
+
+GisticComplexGroupOncoplot <- function(
+    mat,
+    is_somatic_matched = TRUE,
+    split_by_group = "FST.Group",
+    sort_group_level = c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP"),
+    main_group = "FS-DFSP",
+    sample_annotation = c("FST.Group", "Metastasis"),
+    column_title = NULL,
+    width = 18,
+    height = 12,
+    dir = "figures/oncoplot",
+    filename = "oncoplot"
+) {
+    
+    ## Get matched clinical info
+    clinical_info <- LoadClinicalInfo(is_somatic_matched = is_somatic_matched)
+
+    ## Prepare the plot data for each heatmap
+    plot_data <- list()
+
+    for (i in sort_group_level) {
+
+        sample_ids <- clinical_info |> 
+            filter(!!sym(split_by_group) == i) |> 
+            pull(Sample.ID)
+
+        ## Matrix
+        cur_mat <- mat[, sample_ids, drop = FALSE]
+        plot_data[[i]][["mat"]] <- cur_mat
+
+        ## Sample annotation colors
+        sample_idx <- match(
+            colnames(cur_mat), 
+            clinical_info$Sample.ID
+        )
+
+        cur_sample_annotation <- clinical_info[sample_idx, ] |> 
+            select(Sample.ID, all_of(sample_annotation)) |> 
+            column_to_rownames("Sample.ID")
+        
+        plot_data[[i]][["sample_annotation"]] <- cur_sample_annotation
+        
+        ## Calcualte the freq data
+        # cn_mat[]
+    }
+    
+    ## "---------------------------------------------------------------------"
+    ## Sample annotation colors
+    ## "---------------------------------------------------------------------"
+    sample_annotation_colors <- list()
+
+    for (annotation in sample_annotation) {
+        sample_annotation_colors[[annotation]] <- study_colors[[annotation]]
+    }
+
+    ## "---------------------------------------------------------------------"
+    ## Create the matrix annotation colors
+    ## "---------------------------------------------------------------------"
+    alterations <- c("Amp", "Del")
+    alteration_colors <- c()
+    for (i in alterations) {
+        alteration_colors <- c(alteration_colors, study_colors$gistic_cn_class[i])
+    }
+
+    alter_fun <- list(
+        background = alter_graphic("rect", fill = "#CCCCCC"),
+        Amp = alter_graphic("rect", fill = alteration_colors[["Amp"]]),
+        Del = alter_graphic("rect", fill = alteration_colors[["Del"]])
+    )
+
+    ## "---------------------------------------------------------------------"
+    ## Generate the heatmap list
+    ## "---------------------------------------------------------------------"
+    ht_list <- list()
+    n_group <- length(sort_group_level)
+    main_ht_idx <- n_group
+
+    title_size <- 7
+    text_size <- 6
+
+    for (i in seq_along(sort_group_level)) {
+
+        if (i == n_group) {
+            
+            show_annotation_name <- TRUE
+            show_row_names <- TRUE
+            show_heatmap_legend <- TRUE
+
+        } else {
+
+            show_annotation_name <- FALSE
+            show_row_names <- FALSE
+            show_heatmap_legend <- FALSE
+        }
+        
+        bottom_annotation <- HeatmapAnnotation(
+                df = plot_data[[i]][["sample_annotation"]],
+                col = sample_annotation_colors,
+                annotation_height = unit(c(4, 4), "mm"),
+                annotation_name_gp = gpar(fontsize = text_size),
+                annotation_legend_param = list(
+                    labels_gp = gpar(fontsize = text_size),       # Legend text
+                    title_gp = gpar(fontsize = title_size)         # Legend title
+                ),
+                show_annotation_name = show_annotation_name
+        )
+
+        ht_list[[i]] <- oncoPrint(
+            plot_data[[i]][["mat"]],
+            alter_fun = alter_fun,
+            col = alteration_colors,
+            bottom_annotation = bottom_annotation,
+            show_row_names = show_row_names,
+            row_names_side = "right",
+            row_names_gp = gpar(fontsize = text_size),
+            show_column_names = TRUE,
+            column_names_gp = gpar(fontsize = text_size),
+            column_title_gp = gpar(fontsize = title_size),
+            show_heatmap_legend = FALSE,
+            heatmap_legend_param = list(
+                # labels_gp = gpar(fontsize = text_size), 
+                title_gp = gpar(fontsize = title_size),
+                title = "CNV Alteration"
+            ),
+            show_pct = TRUE,
+            pct_digits = 0,
+            pct_side = "left",
+            pct_gp = gpar(fontsize = text_size)
+        )
+    }
+
+    ht_combined <- Reduce(`+`, ht_list)
+    
+    heatmap_legend <- Legend(
+            labels = names(alteration_colors),
+            legend_gp = gpar(fill = alteration_colors),
+            title = "CNV Alteration",
+            title_gp = gpar(fontsize = title_size),
+            labels_gp = gpar(fontsize = text_size),
+            grid_height = unit(4, "mm"),
+            grid_width = unit(4, "mm")
+    )
+
+    ## Save the oncoplot
+    dir_create(here(dir))
+    img_type <- c(".pdf", ".png")
+    
+    for (img in img_type) {
+        
+        file <- here(dir, paste0(filename, img))
+        
+        if (img == ".pdf") {
+
+            # CairoPDF(file, width = width, height = height)
+            pdf(file, width = width, height = height)
+    
+        } else if (img == ".png") {
+    
+            # CairoPNG(
+            #     file, width = width, height = height, res = 300, units = "in",
+            #     fonts = "Arial"
+            # )
+            png(
+                file, width = width, height = height, res = 600, units = "in",
+                fonts = "Arial"
+            )
+        }
+        
+        draw(
+            ht_combined, 
+            main_heatmap = main_ht_idx,
+            ht_gap = unit(0.2, "cm"),
+
+            ## Heatmap legend
+            show_heatmap_legend = TRUE,
+            heatmap_legend_side = "bottom",
+
+            ## Annotation legend
+            annotation_legend_side = "bottom",
+        
+            merge_legends = TRUE,
+            legend_gap = unit(1, "cm"),
+            padding = unit(c(1, 1, 1, 1), "cm"),
+
+            ## Add manual heatmap legend
+            heatmap_legend_list = list(heatmap_legend)
+        )
+        
+        dev.off()
+
+        message(
+            paste0("Saved oncoplot: ", file)
+        )
+    }
 
 }
 
@@ -5458,10 +5921,11 @@ AddPeaksPCGRCountData <- function(
         ) |> 
         mutate(
             group = {{group}},
-            peak_label = sapply(
-                str_split(cytoband, ":"),
-                function(x) x[2]
-            )
+            peak_label = cytoband
+            # peak_label = sapply(
+            #     str_split(cytoband, ":"),
+            #     function(x) x[2]
+            # )
         ) |> 
         mutate(
             peak_label = paste0(
@@ -5497,4 +5961,799 @@ LoadPCGRCytobandStatData <- function(
         filename = filename,
         dir = dir
     )
+}
+
+GetGisticCNData <- function(
+    gistic_dir, 
+    group = "all_tumors", 
+    gistic_qval_thres = 0.5
+) {
+
+    gistic <- LoadGisticData(
+        gistic_dir = gistic_dir,
+        group = group,
+        gistic_qval_thres = gistic_qval_thres
+    )
+
+    ## Get alternation matrix data
+    cn_mat <- gistic@cnMatrix
+    # num_mat = gistic@numericMatrix
+    # dim(cn_mat)
+    # cn_mat[1:5, 1:5]
+
+    cn_cytoband_tbl <- cn_mat |> 
+        as_tibble(rownames = "Unique_Name")
+
+    cytoband_samples <- colnames(cn_cytoband_tbl)[-1]
+
+    ## Get the gene-level data
+    cn_gene_data <- gistic@data |> 
+        as_tibble() |> 
+        clean_names() |> 
+        dplyr::rename(
+            symbol = hugo_symbol,
+            sample_id = tumor_sample_barcode,
+            variant_class = variant_classification,
+        )
+
+    gene_samples <- cn_gene_data |> pull(sample_id) |> unique()
+
+    missed_sample <- setdiff(cytoband_samples, gene_samples)
+
+    cn_gene_tbl <- cn_gene_data |>
+        group_by(symbol, sample_id) |>
+        summarise(
+            variant_class = paste(unique(variant_class), collapse = ","),
+            .groups = "drop"
+        ) |>
+        pivot_wider(
+            names_from = sample_id,
+            values_from = variant_class,
+            values_fill = ""
+        ) |> 
+        mutate(across(everything(), as.character))
+
+    if (length(missed_sample > 0)) {
+
+        cn_gene_tbl <- cn_gene_tbl |> 
+            add_column(!!sym(missed_sample) := "")
+    }
+
+    list(
+        cn_cytoband_tbl = cn_cytoband_tbl,
+        cn_gene_tbl = cn_gene_tbl,
+        cn_gene_data = cn_gene_data
+    )
+}
+
+GetGisticGeneData <- function(
+    gistic_dir, 
+    group = "all_tumors", 
+    gistic_qval_thres = 0.5
+) {
+
+    gistic <- LoadGisticData(
+        gistic_dir = gistic_dir,
+        group = group,
+        gistic_qval_thres = gistic_qval_thres
+    )
+
+    gistic@gene.summary
+    gistic@data
+
+    ## Get alternation matrix data
+    cn_mat <- gistic@cnMatrix
+    # num_mat = gistic@numericMatrix
+    # dim(cn_mat)
+    # cn_mat[1:5, 1:5]
+
+    cn_data <- cn_mat |> as_tibble(rownames = "Unique_Name")
+    
+    cn_data
+}
+
+GetGisticCytobandGroupStatRes <- function(
+    cn_cytoband_tbl,
+    group1_samples,
+    group2_samples,
+    group_comparison,
+    alternative = "two.sided",
+    p_adjust_method = "BH"
+) {
+
+    ## Get the matched group info
+    group1_total <- length(group1_samples)
+    group2_total <- length(group2_samples)
+
+    # ## Load the Gistic2 data that with loose threshold using all samples as it 
+    # ## contains more peaks data
+    # gistic <- LoadGisticData(
+    #     gistic_dir = gistic_dir,
+    #     group = "all_tumors",
+    #     gistic_qval_thres = 0.5
+    # )
+
+    # ## Cytoband summary data
+    # cytoband_summary <- gistic@cytoband.summary |> as_tibble()
+
+    # cn_data <- GetGisticCNData(
+    #     gistic_dir = gistic_dir,
+    #     group = "all_tumors",
+    #     gistic_qval_thres = 0.5
+    # ) |>
+    #     pivot_longer(
+    #         cols = -Unique_Name,
+    #         names_to = "Sample.ID",
+    #         values_to = "cn_status"
+    #     )
+
+    cn_data <- cn_cytoband_tbl |> 
+        pivot_longer(
+            cols = -Unique_Name,
+            names_to = "Sample.ID",
+            values_to = "cn_status"
+        )
+
+    ## Calculate the alteration frequencies
+    group1_freq_data <- cn_data |> 
+        filter(Sample.ID %in% group1_samples) |> 
+        group_by(Unique_Name) |>
+        summarise(
+            group1_altered = sum(cn_status !=""),
+            .groups = "drop"
+        ) |> 
+        mutate(group1_total = group1_total)
+
+    group2_freq_data <- cn_data |> 
+        filter(Sample.ID %in% group2_samples) |> 
+        group_by(Unique_Name) |>
+        summarise(
+            group2_altered = sum(cn_status !=""),
+            .groups = "drop"
+        ) |> 
+        mutate(group2_total = group2_total)
+
+    freq_data <- group1_freq_data |> 
+        left_join(group2_freq_data, by = "Unique_Name") |> 
+        mutate(
+            group1_freq = group1_altered / group1_total,
+            group2_freq = group2_altered / group2_total,
+            freq_diff = group2_freq - group1_freq
+        )
+
+    ## Do the fisher test
+    all_cytobands <- unique(freq_data$Unique_Name)
+
+    fisher_results <- map_dfr(
+        all_cytobands,
+        function(cytoband) {
+
+            cur_data <- freq_data |> filter(Unique_Name == cytoband)
+
+            group1_altered <- cur_data |> pull(group1_altered)
+
+            group2_altered <- cur_data |> pull(group2_altered)
+
+            group1_total <- cur_data |> pull(group1_total)
+
+            group2_total <- cur_data |> pull(group2_total)
+
+            ## Fisher's exact test
+            contingency_table <- matrix(
+                    c(
+                        group1_altered, group1_total - group1_altered,
+                        group2_altered, group2_total - group2_altered
+                    ), 
+                    byrow = TRUE,
+                    nrow = 2
+            )
+            colnames(contingency_table) <- c("Altered", "Not_Altered")
+            rownames(contingency_table) <- c("Group1", "Group2")
+
+            fisher_test <- fisher.test(
+                contingency_table,
+                alternative = alternative
+            )
+
+            tibble(
+                Unique_Name = cytoband,
+                fisher_p_value = fisher_test$p.value,
+                # fisher_odds_ratio = fisher_test$estimate
+                # conf_int_low = fisher_test$conf.int[1],
+                # conf_int_high = fisher_test$conf.int[2]
+            )
+        }
+    ) |> 
+    ## Adjust for multiple testing
+    mutate(
+        fisher_p_adj = p.adjust(
+            fisher_p_value, 
+            method = p_adjust_method
+        )
+    ) |> 
+    arrange(fisher_p_value)
+    
+    ## Merge the data
+    freq_data |> 
+        left_join(fisher_results, by = "Unique_Name") |> 
+        # left_join(cytoband_summary, by = "Unique_Name") |> 
+        mutate(group_comparison = group_comparison, .after = Unique_Name)
+}
+
+GetGisticCNVGeneGroupStatRes <- function(
+    cn_gene_tbl,
+    group1_samples,
+    group2_samples,
+    group_comparison,
+    alternative = "two.sided",
+    p_adjust_method = "BH"
+) {
+
+    ## Get the matched group info
+    group1_total <- length(group1_samples)
+    group2_total <- length(group2_samples)
+
+    # ## Load the Gistic2 data that with loose threshold using all samples as it 
+    # ## contains more peaks data
+    # gistic <- LoadGisticData(
+    #     gistic_dir = gistic_dir,
+    #     group = "all_tumors",
+    #     gistic_qval_thres = 0.5
+    # )
+
+    # ## Cytoband summary data
+    # cytoband_summary <- gistic@cytoband.summary |> as_tibble()
+
+    # cn_data <- GetGisticCNData(
+    #     gistic_dir = gistic_dir,
+    #     group = "all_tumors",
+    #     gistic_qval_thres = 0.5
+    # ) |>
+    #     pivot_longer(
+    #         cols = -Unique_Name,
+    #         names_to = "Sample.ID",
+    #         values_to = "cn_status"
+    #     )
+
+    cn_data <- cn_gene_tbl |> 
+        pivot_longer(
+            cols = -symbol,
+            names_to = "sample_id",
+            values_to = "cn_status"
+        )
+
+    ## Calculate the alteration frequencies
+    group1_freq_data <- cn_data |> 
+        filter(sample_id %in% group1_samples) |> 
+        group_by(symbol) |>
+        summarise(
+            group1_altered = sum(cn_status !=""),
+            .groups = "drop"
+        ) |> 
+        mutate(group1_total = group1_total)
+
+    group2_freq_data <- cn_data |> 
+        filter(sample_id %in% group2_samples) |> 
+        group_by(symbol) |>
+        summarise(
+            group2_altered = sum(cn_status !=""),
+            .groups = "drop"
+        ) |> 
+        mutate(group2_total = group2_total)
+
+    freq_data <- group1_freq_data |> 
+        left_join(group2_freq_data, by = "symbol") |> 
+        mutate(
+            group1_freq = group1_altered / group1_total,
+            group2_freq = group2_altered / group2_total,
+            freq_diff = group2_freq - group1_freq
+        )
+
+    ## Do the fisher test
+    all_symbols <- unique(freq_data$symbol)
+
+    fisher_results <- map_dfr(
+        all_symbols,
+        function(gene) {
+
+            cur_data <- freq_data |> filter(symbol == gene)
+
+            group1_altered <- cur_data |> pull(group1_altered)
+
+            group2_altered <- cur_data |> pull(group2_altered)
+
+            group1_total <- cur_data |> pull(group1_total)
+
+            group2_total <- cur_data |> pull(group2_total)
+
+            ## Fisher's exact test
+            contingency_table <- matrix(
+                    c(
+                        group1_altered, group1_total - group1_altered,
+                        group2_altered, group2_total - group2_altered
+                    ), 
+                    byrow = TRUE,
+                    nrow = 2
+            )
+            colnames(contingency_table) <- c("Altered", "Not_Altered")
+            rownames(contingency_table) <- c("Group1", "Group2")
+
+            fisher_test <- fisher.test(
+                contingency_table,
+                alternative = alternative
+            )
+
+            tibble(
+                symbol = gene,
+                fisher_p_value = fisher_test$p.value,
+                # fisher_odds_ratio = fisher_test$estimate
+                # conf_int_low = fisher_test$conf.int[1],
+                # conf_int_high = fisher_test$conf.int[2]
+            )
+        }
+    ) |> 
+    ## Adjust for multiple testing
+    mutate(
+        fisher_p_adj = p.adjust(
+            fisher_p_value, 
+            method = p_adjust_method
+        )
+    ) |> 
+    arrange(fisher_p_value)
+    
+    ## Merge the data
+    freq_data |> 
+        left_join(fisher_results, by = "symbol") |> 
+        # left_join(cytoband_summary, by = "Unique_Name") |> 
+        mutate(group_comparison = group_comparison, .after = symbol)
+}
+
+GetPCGRSNVIncelGroupStatRes <- function(
+    snv_indel_tbl,
+    group1_samples,
+    group2_samples,
+    group_comparison,
+    alternative = "two.sided",
+    p_adjust_method = "BH"
+) {
+
+    ## Get the matched group info
+    group1_total <- length(group1_samples)
+    group2_total <- length(group2_samples)
+
+    ## Calculate the alteration frequencies
+    group1_freq_data <- snv_indel_tbl |> 
+        pivot_longer(
+            cols = -symbol,
+            names_to = "sample_id",
+            values_to = "variant_class"
+        ) |> 
+        filter(sample_id %in% group1_samples) |> 
+        group_by(symbol) |>
+        summarise(
+            group1_altered = sum(variant_class !=""),
+            .groups = "drop"
+        ) |> 
+        mutate(group1_total = group1_total)
+
+    group2_freq_data <- snv_indel_tbl |> 
+        pivot_longer(
+            cols = -symbol,
+            names_to = "sample_id",
+            values_to = "variant_class"
+        ) |> 
+        filter(sample_id %in% group2_samples) |> 
+        group_by(symbol) |>
+        summarise(
+            group2_altered = sum(variant_class !=""),
+            .groups = "drop"
+        ) |> 
+        mutate(group2_total = group2_total)
+
+    freq_data <- group1_freq_data |> 
+        left_join(group2_freq_data, by = "symbol") |> 
+        mutate(
+            group1_freq = group1_altered / group1_total,
+            group2_freq = group2_altered / group2_total,
+            freq_diff = group2_freq - group1_freq
+        )
+
+    ## Do the fisher test
+    all_genes <- unique(freq_data$symbol)
+
+    fisher_results <- map_dfr(
+        all_genes,
+        function(gene) {
+
+            cur_data <- freq_data |> filter(symbol == gene)
+
+            group1_altered <- cur_data |> pull(group1_altered)
+
+            group2_altered <- cur_data |> pull(group2_altered)
+
+            group1_total <- cur_data |> pull(group1_total)
+
+            group2_total <- cur_data |> pull(group2_total)
+
+            ## Fisher's exact test
+            contingency_table <- matrix(
+                    c(
+                        group1_altered, group1_total - group1_altered,
+                        group2_altered, group2_total - group2_altered
+                    ), 
+                    byrow = TRUE,
+                    nrow = 2
+            )
+            colnames(contingency_table) <- c("Altered", "Not_Altered")
+            rownames(contingency_table) <- c("Group1", "Group2")
+
+            fisher_test <- fisher.test(
+                contingency_table,
+                alternative = alternative
+            )
+
+            tibble(
+                symbol = gene,
+                fisher_p_value = fisher_test$p.value,
+                # fisher_odds_ratio = fisher_test$estimate
+                # conf_int_low = fisher_test$conf.int[1],
+                # conf_int_high = fisher_test$conf.int[2]
+            )
+        }
+    ) |> 
+    ## Adjust for multiple testing
+    mutate(
+        fisher_p_adj = p.adjust(
+            fisher_p_value, 
+            method = p_adjust_method
+        )
+    ) |> 
+    arrange(fisher_p_value)
+    
+    ## Merge the data
+    freq_data |> 
+        left_join(fisher_results, by = "symbol") |> 
+        mutate(group_comparison = group_comparison, .after = symbol)
+}
+
+GetGroupStatRes <- function(
+    mat,
+    group1_samples,
+    group2_samples,
+    variant_type = "symbol",
+    group_comparison,
+    alternative = "two.sided",
+    p_adjust_method = "BH"
+) {
+
+    ## Get the matched group info
+    group1_total <- length(group1_samples)
+    group2_total <- length(group2_samples)
+
+    stat_data <- as_tibble(mat, rownames = variant_type) |>
+        pivot_longer(
+            cols = -!!sym(variant_type),
+            names_to = "sample_id",
+            values_to = "variant_class"
+        )
+
+    # variants <- unique(stat_data$variant_class)
+    # message(
+    #     paste0(" - Variants: ", paste(variants, collapse = ", "))
+    # )
+    
+    ## Calculate the alteration frequencies
+    group1_freq_data <- stat_data |> 
+        filter(sample_id %in% group1_samples) |> 
+        group_by(!!sym(variant_type)) |>
+        summarise(
+            group1_altered = sum(variant_class !=""),
+            .groups = "drop"
+        ) |> 
+        mutate(group1_total = group1_total)
+
+    group2_freq_data <- stat_data |> 
+        filter(sample_id %in% group2_samples) |> 
+        group_by(!!sym(variant_type)) |>
+        summarise(
+            group2_altered = sum(variant_class !=""),
+            .groups = "drop"
+        ) |> 
+        mutate(group2_total = group2_total)
+
+    freq_data <- group1_freq_data |> 
+        left_join(group2_freq_data, by = variant_type) |> 
+        mutate(
+            group1_freq = group1_altered / group1_total,
+            group2_freq = group2_altered / group2_total,
+            freq_diff = group2_freq - group1_freq
+        )
+
+    ## Do the fisher test
+    all_variants <- unique(freq_data[[variant_type]])
+
+    fisher_results <- map_dfr(
+        all_variants,
+        function(variant) {
+
+            cur_data <- freq_data |> filter(!!sym(variant_type) == variant)
+
+            group1_altered <- cur_data |> pull(group1_altered)
+
+            group2_altered <- cur_data |> pull(group2_altered)
+
+            group1_total <- cur_data |> pull(group1_total)
+
+            group2_total <- cur_data |> pull(group2_total)
+
+            ## Fisher's exact test
+            contingency_table <- matrix(
+                    c(
+                        group1_altered, group1_total - group1_altered,
+                        group2_altered, group2_total - group2_altered
+                    ), 
+                    byrow = TRUE,
+                    nrow = 2
+            )
+            colnames(contingency_table) <- c("Altered", "Not_Altered")
+            rownames(contingency_table) <- c("Group1", "Group2")
+
+            fisher_test <- fisher.test(
+                contingency_table,
+                alternative = alternative
+            )
+
+            tibble(
+                {{variant_type}} := variant,
+                fisher_p_val = fisher_test$p.value,
+                # fisher_odds_ratio = fisher_test$estimate
+                # conf_int_low = fisher_test$conf.int[1],
+                # conf_int_high = fisher_test$conf.int[2]
+            )
+        }
+    ) |> 
+    ## Adjust for multiple testing
+    mutate(
+        fisher_p_adj = p.adjust(
+            fisher_p_val, 
+            method = p_adjust_method
+        )
+    )
+    
+    ## Merge the data
+    freq_data |> 
+        left_join(fisher_results, by = variant_type) |> 
+        mutate(
+            group_comparison = group_comparison, 
+            .after = {{variant_type}}
+        ) |> 
+        arrange(fisher_p_val)
+}
+
+LoadCBioPortalSarcomaData <- function(
+    mutate_gene_freq_thres = 0.01,
+    cna_gene_freq_thres = 0.1,
+    structural_variants_freq_thres = 0.01
+
+) {
+    ## Public cohorts of sarcoma from cBioPortal:
+    ##  - Adult Soft Tissue Sarcomas (TCGA, Cell 2017)
+    ##  - Sarcoma (MSK, Nat Commun. 2022)
+    ##  - Sarcoma (MSKCC/Broad, Nat Genet 2010)
+    ##  - Sarcoma (TCGA, Firehose Legacy)
+    ##  - Sarcoma (TCGA, PanCancer Atlas)
+    ##  - Sarcoma (UCLA, Cell 2024)
+    ##  - Soft Tissue Cancer (TCGA, GDC)
+    ##  - Soft Tissue Sarcoma (MSK, 2025)
+    ##  - Soft Tissue and Bone Sarcoma (MSK, Nat Commun 2022)
+
+    ## "---------------------------------------------------------------------"
+    ## Mutated gene data
+    ## "---------------------------------------------------------------------"
+    mutated_gene_file <- "data/public/cBioPortal_sarcoma_mutated_genes.txt"
+    
+    mutated_gene_data <- read_tsv(
+        here(mutated_gene_file), 
+        show_col_types = FALSE
+    ) |>
+        clean_names() |>
+        select(gene, freq, is_cancer_gene_source_onco_kb) |>
+        dplyr::rename(
+            symbol = gene, 
+            freq = freq,
+            is_oncokb = is_cancer_gene_source_onco_kb
+        ) |>
+        mutate(freq = parse_number(freq)/100) |>
+        arrange(desc(freq)) |>
+        filter(freq >= mutate_gene_freq_thres)
+
+    ## "---------------------------------------------------------------------"
+    ## CNA gene data
+    ## "---------------------------------------------------------------------"
+    cna_gene_file <- "data/public/cBioPortal_sarcoma_CNA_genes.txt"
+
+    cna_gene_data <- read_tsv(
+            cna_gene_file, 
+            show_col_types = FALSE
+    ) |> 
+        clean_names() |> 
+        select(
+            gene, cytoband, cna, freq, is_cancer_gene_source_onco_kb
+        ) |> 
+        dplyr::rename(
+            symbol = gene,
+            cytoband = cytoband,
+            cn_status = cna,
+            freq = freq,
+            is_oncokb = is_cancer_gene_source_onco_kb
+        ) |> 
+        mutate(freq = parse_number(freq)/100) |> 
+        arrange(desc(freq)) |> 
+        filter(freq >= cna_gene_freq_thres)
+
+    ## "---------------------------------------------------------------------"
+    ## Structural variants
+    ## "---------------------------------------------------------------------"
+    structural_variants_file <- "data/public/cBioPortal_sarcoma_structural_variants.txt"
+
+    structural_variants_data <- read_tsv(
+        here(structural_variants_file), 
+        show_col_types = FALSE
+    ) |> 
+        clean_names() |> 
+        select(
+            gene, number_structural_variant, freq, is_cancer_gene_source_onco_kb
+        ) |> 
+        dplyr::rename(
+            symbol = gene,
+            number_structural_variant = number_structural_variant,
+            freq = freq,
+            is_oncokb = is_cancer_gene_source_onco_kb
+        ) |> 
+        mutate(freq = parse_number(freq)/100) |> 
+        arrange(desc(freq)) |> 
+        filter(freq >= structural_variants_freq_thres)
+
+    ## Return
+    list(
+        mutated_gene_data = mutated_gene_data,
+        cna_gene_data = cna_gene_data,
+        structural_variants_data = structural_variants_data
+    )
+}
+
+LoadDFSPStudyData <- function() {
+    
+    ## There are two major DFSP study
+    ## peng_2022 (https://doi.org/10.1111/bjd.20976)
+    ## smith_2025 (https://www.sciencedirect.com/science/article/pii/S089339522500033X)
+    
+    list(
+        ## Modern pathology
+        smith_2025 = list(
+            mutated_genes = c(
+                "FANCC", "TERT", "CHEK2",
+                "KMT2D", "BRIP1", "ERCC2", "KMT2A",
+                "MGA", "MTOR", "PTEN", "RAD50",
+                "RIT1", "TP53"
+            ),
+            cna_genes = c(
+            "PRKAR1A", "H3F3B", "MSI2", 
+            "SRSF2", "BRIP1", "DDX5", "CLTC", 
+            "GNA13", "CRKL", "MCL1", "MYH9",
+            "SEPT9", "SOX10",
+            "ATP1A1", "CANT1", "CLTCL1", "DAXX", "ERG", "EZR",
+            "FGFR1OP",
+            "LIFR",
+            "MAF",
+            "NOTCH2",
+            "PDGFRB",
+            "PRRX1",
+            "RAC1",
+            "RICTOR",
+            "RNF43"
+            )
+        ),
+
+        ## BJD
+        peng_2022 = list(
+            mutated_genes = c(
+                "MUC6", "MUC4", "KMT2C",
+                "HERC2", "HLA-A", "PRSS3", "PDE4DIP",
+                "PRSS1", "RBMXL1", "BRCA1", "CTBP2",
+                "HLA-B", "HLA-DQA2", "LILRA6", "OR8U1",
+                "PABPC1", "PCSK1", "ZXDB"
+            ),
+            cna_genes = c(
+                "TERT", "CDKN2A", "CDKN2B",
+                "AKT1", "NFKBIA", "BTBD7", "SPHK1", 
+                "ITGB4", "COL1A1", "PDGFB", "PDGFD"
+            )
+        )
+    )
+}
+
+GetPCGRVariantMat <- function(
+    data,
+    variant_type = "symbol",
+    variant_class = "variant_class",
+    is_somatic_matched = TRUE
+) {
+
+    ## Load clincial info
+    clinical_info <- LoadClinicalInfo(is_somatic_matched = is_somatic_matched)
+
+    all_samples <- unique(clinical_info$Sample.ID)
+
+    ## Keep releveant data
+    cur_data <- data |> filter(sample_id %in% all_samples)
+
+    cur_samples <- unique(cur_data$sample_id)
+
+    missed_sample <- setdiff(clinical_info$Sample.ID, cur_samples)
+
+    ## Save a clearned data: row=gene name, column=sample_id
+    variant_tbl <- cur_data |> 
+        group_by(sample_id, !!sym(variant_type)) |>
+        summarise(
+            variant_class = paste(
+                unique(!!sym(variant_class)), collapse = ","
+            ),
+            .groups = "drop"
+        ) |> 
+        pivot_wider(
+            names_from = sample_id,
+            values_from = variant_class,
+            values_fill = ""
+        )
+
+    if (length(missed_sample) > 0) {
+    
+        message(
+            paste0(" - No variants could be found for these samples: ")
+        )
+        message(
+            paste0(" > ", missed_sample, collapse = "\n")
+        )
+
+        ## Add the missed sample
+        for (i in missed_sample) {
+            variant_tbl <- variant_tbl |> 
+                add_column(!!i := "")
+        }
+    }
+
+    variant_mat <- variant_tbl |> 
+        column_to_rownames(var = variant_type) |>
+        as.matrix()
+    
+    ## print out the dimension
+    n_sample <- ncol(variant_mat)
+    n_variant <- nrow(variant_mat)
+
+    message(
+        paste0(" - samples: ", n_sample, ", variants: ", n_variant)
+    )
+
+    variant_mat
+}
+
+GetPCGRVariantFreq <- function(
+    mat,
+    variant_type = "symbol"
+) {
+
+    as_tibble(mat, rownames = variant_type) |>
+        pivot_longer(
+            cols = -!!sym(variant_type),
+            names_to = "sample_id",
+            values_to = "variant_class"
+        ) |>
+        group_by(!!sym(variant_type)) |>
+        summarise(
+            n_altered = sum(variant_class != ""),
+            n_total = n_distinct(sample_id),
+            freq = n_altered / n_total
+        ) |>
+        arrange(desc(n_altered))
 }

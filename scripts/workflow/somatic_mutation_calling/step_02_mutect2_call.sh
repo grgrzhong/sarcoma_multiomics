@@ -5,9 +5,12 @@
 # This script performs Mutect2 variant calling, filtering, and annotation.
 #############################################################################
 
+source "$(dirname "${BASH_SOURCE[0]}")/conf/config.sh"
+
 # Create the output directories if they do not exist
 mkdir -p "${MUTECT2_DIR}"
 
+tumour_id="MFS-001-T"
 ## Function to run mutect2 and filtering
 mutect2_call() {
     
@@ -29,14 +32,16 @@ mutect2_call() {
     singularity exec \
         --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
         --bind "${BAM_DIR}:${BAM_DIR}" \
+        --bind "${REFERENCE_DIR}:${REFERENCE_DIR}" \
         --bind "${MUTECT2_DIR}:${MUTECT2_DIR}" \
         --bind /tmp:/tmp \
-        "${CONTAINER_DIR}/gatk.sif" \
+        "${CONTAINER_DIR}/gatk4.sif" \
         gatk GetPileupSummaries \
             -I "${BAM_DIR}/${tumour_id}/${tumour_id}_recalibrated.bam" \
             -V "${REFERENCE_DIR}/GetPileupSummary/small_exac_common_3.hg38.vcf.gz" \
             -L "${REFERENCE_DIR}/GetPileupSummary/small_exac_common_3.hg38.vcf.gz" \
-            -O "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.getpileupsummaries.table"
+            -O "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.getpileupsummaries.table" \
+            >& "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.getpileupsummaries.log"
 
     if [[ $? -ne 0 ]]; then
         echo "ERROR: GetPileupSummaries failed for ${tumour_id}"
@@ -50,14 +55,16 @@ mutect2_call() {
     singularity exec \
         --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
         --bind "${BAM_DIR}:${BAM_DIR}" \
+        --bind "${REFERENCE_DIR}:${REFERENCE_DIR}" \
         --bind "${MUTECT2_DIR}:${MUTECT2_DIR}" \
         --bind /tmp:/tmp \
-        "${CONTAINER_DIR}/gatk.sif" \
+        "${CONTAINER_DIR}/gatk4.sif" \
         gatk GetPileupSummaries \
             -I "${BAM_DIR}/${normal_id}/${normal_id}_recalibrated.bam" \
             -V "${REFERENCE_DIR}/GetPileupSummary/small_exac_common_3.hg38.vcf.gz" \
             -L "${REFERENCE_DIR}/GetPileupSummary/small_exac_common_3.hg38.vcf.gz" \
-            -O "${MUTECT2_DIR}/${tumour_id}/${normal_id}.getpileupsummaries.table"
+            -O "${MUTECT2_DIR}/${tumour_id}/${normal_id}.getpileupsummaries.table" \
+            >& "${MUTECT2_DIR}/${tumour_id}/${normal_id}.getpileupsummaries.log"
 
         if [[ $? -ne 0 ]]; then
             echo "ERROR: GetPileupSummaries failed for ${normal_id}"
@@ -71,18 +78,19 @@ mutect2_call() {
     ## Calculate contamination based on tumour samples only
     if [ -d "${BAM_DIR}/${normal_id}" ]; then
 
-        echo "$(date +"%F") $(date +"%T") - (${tumour_id}) Calculating contamination of paired samples ..."
+        echo "$(date +"%F") $(date +"%T") - (${tumour_id}) Calculating contamination of matched samples ..."
 
         singularity exec \
             --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
             --bind "${MUTECT2_DIR}:${MUTECT2_DIR}" \
             --bind /tmp:/tmp \
-            "${CONTAINER_DIR}/gatk.sif" \
+            "${CONTAINER_DIR}/gatk4.sif" \
             gatk CalculateContamination \
                 -I "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.getpileupsummaries.table" \
                 -matched "${MUTECT2_DIR}/${tumour_id}/${normal_id}.getpileupsummaries.table" \
                 -O "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.contamination.table" \
-                -segments "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.segments.table"
+                -segments "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.segments.table" \
+                >& "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.contamination.log"
 
         if [[ $? -ne 0 ]]; then
             echo "ERROR: CalculateContamination failed for ${tumour_id}_vs_${normal_id}"
@@ -91,17 +99,18 @@ mutect2_call() {
 
     else
         # Calculate contamination based on tumour samples only
-        echo "$(date +"%F") $(date +"%T") - (${tumour_id}) Calculating contamination of unpaired samples ..."
+        echo "$(date +"%F") $(date +"%T") - (${tumour_id}) Calculating contamination of unmatched samples ..."
         
         singularity exec \
             --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
             --bind "${MUTECT2_DIR}:${MUTECT2_DIR}" \
             --bind /tmp:/tmp \
-            "${CONTAINER_DIR}/gatk.sif" \
+            "${CONTAINER_DIR}/gatk4.sif" \
             gatk CalculateContamination \
                 -I "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.getpileupsummaries.table" \
                 -O "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.contamination.table" \
-                -segments "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.segments.table"
+                -segments "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.segments.table" \
+                >& "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.contamination.log"
 
         if [[ $? -ne 0 ]]; then
             echo "ERROR: CalculateContamination failed for ${tumour_id}"
@@ -115,14 +124,15 @@ mutect2_call() {
     # Call variant on paired tumour samples
     if [ -d "${BAM_DIR}/${normal_id}" ]; then
 
-        echo "$(date +"%F") $(date +"%T") - (${tumour_id}) Mutect2 call somatic variants on paired samples ..."
+        echo "$(date +"%F") $(date +"%T") - (${tumour_id}) Mutect2 call on matched samples ..."
 
         singularity exec \
             --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
             --bind "${BAM_DIR}:${BAM_DIR}" \
+            --bind "${REFERENCE_DIR}:${REFERENCE_DIR}" \
             --bind "${MUTECT2_DIR}:${MUTECT2_DIR}" \
             --bind /tmp:/tmp \
-            "${CONTAINER_DIR}/gatk.sif" \
+            "${CONTAINER_DIR}/gatk4.sif" \
             gatk --java-options -Xmx4g Mutect2 \
                 -I "$BAM_DIR/${tumour_id}/${tumour_id}_recalibrated.bam" \
                 -I "$BAM_DIR/${normal_id}/${normal_id}_recalibrated.bam" \
@@ -145,14 +155,15 @@ mutect2_call() {
 
     else
         ## Mutect2 call variant on unpaired tumour samples
-        echo "$(date +"%F") $(date +"%T") - (${tumour_id}) Mutect2 call somatic variants on unpaired samples ..."
+        echo "$(date +"%F") $(date +"%T") - (${tumour_id}) Mutect2 call on unmatched samples ..."
 
         singularity exec \
             --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
             --bind "${BAM_DIR}:${BAM_DIR}" \
+            --bind "${REFERENCE_DIR}:${REFERENCE_DIR}" \
             --bind "${MUTECT2_DIR}:${MUTECT2_DIR}" \
             --bind /tmp:/tmp \
-            "${CONTAINER_DIR}/gatk.sif" \
+            "${CONTAINER_DIR}/gatk4.sif" \
             gatk --java-options -Xmx8g Mutect2 \
                 -I "${BAM_DIR}/${tumour_id}/${tumour_id}_recalibrated.bam" \
                 -R "${REFERENCE}" \
@@ -180,10 +191,11 @@ mutect2_call() {
         --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
         --bind "${MUTECT2_DIR}:${MUTECT2_DIR}" \
         --bind /tmp:/tmp \
-        "${CONTAINER_DIR}/gatk.sif" \
+        "${CONTAINER_DIR}/gatk4.sif" \
         gatk LearnReadOrientationModel \
             -I "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.f1r2.tar.gz" \
-            -O "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.readorientationmodel.tar.gz"
+            -O "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.readorientationmodel.tar.gz" \
+            >& "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.learnreadorientationmodel.log"
 
     if [[ $? -ne 0 ]]; then
         echo "ERROR: LearnReadOrientationModel failed for ${tumour_id}" >&2
@@ -193,13 +205,14 @@ mutect2_call() {
     ## ====================================================================
     ## Step5. Learn Read Orientation Model bias for artifacts
     ## ====================================================================
-    echo "$(date +"%F") $(date +"%T") - (${tumour_id}) Filtering Mutect calls ..."
+    echo "$(date +"%F") $(date +"%T") - (${tumour_id}) Filtering mutect2 calls ..."
     
     singularity exec \
         --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
         --bind "${MUTECT2_DIR}:${MUTECT2_DIR}" \
+        --bind "${REFERENCE_DIR}:${REFERENCE_DIR}" \
         --bind /tmp:/tmp \
-        "${CONTAINER_DIR}/gatk.sif" \
+        "${CONTAINER_DIR}/gatk4.sif" \
         gatk --java-options -Xmx4g FilterMutectCalls \
             --variant "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.mutect2.vcf.gz" \
             --stats "${MUTECT2_DIR}/${tumour_id}/${tumour_id}.mutect2.vcf.gz.stats" \
@@ -226,6 +239,7 @@ mutect2_call() {
     singularity exec \
         --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
         --bind "${MUTECT2_DIR}:${MUTECT2_DIR}" \
+        --bind "${REFERENCE_DIR}:${REFERENCE_DIR}" \
         --bind /tmp:/tmp \
         "${CONTAINER_DIR}/bcftools.sif" \
         bcftools norm \
@@ -258,6 +272,7 @@ mutect2_call() {
     singularity exec \
         --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
         --bind "${MUTECT2_DIR}:${MUTECT2_DIR}" \
+        --bind "${REFERENCE_DIR}:${REFERENCE_DIR}" \
         --bind /tmp:/tmp \
         "${CONTAINER_DIR}/bcftools.sif" \
         bcftools annotate \
@@ -272,6 +287,7 @@ mutect2_call() {
     singularity exec \
         --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
         --bind "${MUTECT2_DIR}:${MUTECT2_DIR}" \
+        --bind "${REFERENCE_DIR}:${REFERENCE_DIR}" \
         --bind /tmp:/tmp \
         "${CONTAINER_DIR}/bcftools.sif" \
         bcftools annotate \

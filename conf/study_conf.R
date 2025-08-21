@@ -1,3 +1,12 @@
+##############################################################################
+## Description: Configuration settings for the study
+## Author:  Zhong Guorui
+## Created: 2025-02-17
+##############################################################################
+## load customized functions
+source(here::here("scripts/lib/study_lib.R"))
+
+## Define colors
 study_colors <- list(
     cna_class = c(
         "MULTI" = "#b2182b",
@@ -5,6 +14,10 @@ study_colors <- list(
         "GAIN" = "#f4a582",
         "HOMDEL" = "#053061",
         "DEL" = "#4393c3" 
+    ),
+    gistic_cn_class = c(
+        "Amp" = "#d6604d",
+        "Del" = "#053061"
     ),
     FST.Group = c(
         "FS-DFSP" = "#E31A1C", 
@@ -38,41 +51,84 @@ study_colors <- list(
     )
 )
 
-group_comparisons <- list(
-    list(
+FST_group_comparisons <- list(
+    `U-DFSP_vs_Pre-FST` = list(
         group1 = "U-DFSP",
-        group2 = "Pre-FST",
-        name = "U-DFSP_vs_Pre-FST"
+        group2 = "Pre-FST"
     ),
-    list(
+    `U-DFSP_vs_Post-FST` = list(
         group1 = "U-DFSP",
-        group2 = "Post-FST",
-        name = "U-DFSP_vs_Post-FST"
+        group2 = "Post-FST"
     ),
-    list(
+    `U-DFSP_vs_FS-DFSP` = list(
         group1 = "U-DFSP",
-        group2 = "FS-DFSP",
-        name = "U-DFSP_vs_FS-DFSP"
+        group2 = "FS-DFSP"
     ),
-    list(
+    `Pre-FST_vs_Post-FST` = list(
         group1 = "Pre-FST",
-        group2 = "Post-FST",
-        name = "Pre-FST_vs_Post-FST"
+        group2 = "Post-FST"
     ),
-    list(
+    `Pre-FST_vs_FS-DFSP` = list(
         group1 = "Pre-FST",
-        group2 = "FS-DFSP",
-        name = "Pre-FST_vs_FS-DFSP"
+        group2 = "FS-DFSP"
     ),
-    list(
+    `Post-FST_vs_FS-DFSP` = list(
         group1 = "Post-FST",
-        group2 = "FS-DFSP",
-        name = "Post-FST_vs_FS-DFSP"
+        group2 = "FS-DFSP"
     ),
-    list(
+    `U-DFSP+Pre-FST_vs_Post-FST+FS-DFSP` = list(
         group1 = c("U-DFSP", "Pre-FST"),
-        group2 = c("Post-FST", "FS-DFSP"),
-        name = "U-DFSP+Pre-FST_vs_Post-FST+FS-DFSP"
+        group2 = c("Post-FST", "FS-DFSP")
+    )
+)
+
+group_comparisons <- list(
+    ## >>> To find genomic driver event for FST and metastasis
+    ## >>> specifically to determine the “FST-selected genetic features”  and 
+    ## >>> “metastases-selected genetic features” 
+    ## "---------------------------------------------------------------------"
+    ## To find early genetic event that may occur in classic region of cases 
+    ## having FST
+    ## "---------------------------------------------------------------------"
+    `U-DFSP_vs_Pre-FST` = list(
+        group1 = "U-DFSP",
+        group2 = "Pre-FST"
+    ),
+
+    ## "---------------------------------------------------------------------"
+    ## Unpaired primary FST (FS-DFSP) vs. Post-FST
+    ## To find late genetic event in FST
+    ## "---------------------------------------------------------------------"
+    `Post-FST_vs_FS-DFSP` = list(
+        group1 = "Post-FST",
+        group2 = "FS-DFSP"
+    ),
+
+    ## "---------------------------------------------------------------------"
+    ## Unpaired primary FST (FS-DFSP) and unpaired classic samples (U-DFSP)
+    ## Compare the prevalence of different mutations and CNV in classic and FST regions, using Fisher’s exact tests
+    ## This is **much more straight forward to implement, and can be used for the paired samples above for initial evaluation**.
+    ## The list of genes can be compared with paired samples
+    ## "---------------------------------------------------------------------"
+    `U-DFSP_vs_FS-DFSP` = list(
+        group1 = "U-DFSP",
+        group2 = "FS-DFSP"
+    ),
+
+    ## "---------------------------------------------------------------------"
+    ## Paired primary and metastatic samples
+    ## "---------------------------------------------------------------------"
+    Primary_vs_Metastasis = list(
+        group1 = "Primary",
+        group2 = "Metastasis"
+    ),
+
+    ## "---------------------------------------------------------------------"
+    ## Paired classic and FST samples (Pre-FST and Post-FST)
+    ## "---------------------------------------------------------------------"
+    `Pre-FST_vs_Post-FST` = list(
+        group1 = "Pre-FST",
+        group2 = "Post-FST"
     )
 )
 
@@ -83,3 +139,17 @@ FST.Group <- c(
     "FS-DFSP"
 )
 
+HRD_genes <- c(
+    "BRCA1", "BRCA2", "PALB2", "BRIP1", "RAD51C", "RAD51D", 
+    "BARD1", "ATM", "CHEK2", "NBN", "RAD50", "MRE11A",
+    "TP53", "PTEN", "RB1", "CDK12", "ARID1A"
+)
+
+MMR_genes <- c(
+    "MLH1", "MSH2", "MSH6", "PMS2",
+    "MSH3", "PMS1", "MLH3", "PCNA",
+    "RFC1", "RPA1", "POLD1", "POLE"
+)
+
+## WES Capture size
+capture_size <- 34 

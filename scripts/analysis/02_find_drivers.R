@@ -1,236 +1,430 @@
 #!/usr/bin/env Rscript
 ##############################################################################
-## Description: This script processes PCGR data and performs cohort analysis
+## Description: Find genomic drivers for FST and Metastasis
 ## Author:  Zhong Guorui
 ## Created: 2025-06-15
 ##############################################################################
+## Load required functions and configurations
+source(here::here("conf/study_conf.R"))
 
 ## "==========================================================================="
-## General configurations ----
+## Find genomic drivers contribute to FST/Metastatsis --------------
 ## "==========================================================================="
-## Load required libraries and functions
-suppressPackageStartupMessages(
-    suppressWarnings({
-        library(maftools)
-        library(circlize)
-        library(ComplexHeatmap)
-        library(reshape2)
-    })
-)
-source(here::here("scripts/lib/study_lib.R"))
-
-## Output directories
-data_dir <- "data/processed"
-plot_dir <- "figures/wes/pcgr"
-
-## Capture size
-capture_size <- 34 
-
-## Clinical information
-clinical_info <- LoadClinicalInfo()
-
-## "==========================================================================="
-## Collect PCGR CNV data --------------
-## "==========================================================================="
-## Merge all PCGR outputs
-pcgr_dir <- "data/wes/PCGR"
-pcgr_cna_data <- CollectPCGRCNAData(
-    dir = pcgr_dir, 
-    sig_gain_thres = 4
+## Get the SNV/Indel table
+pcgr_snv_indel_tbl <- LoadData(
+    dir = "data/processed",
+    filename = "wes_pcgr_snv_indels_tbl"
 )
 
-colnames(pcgr_cna_data)
+snv_indel_mat <- GetPCGRVariantMat(
+    data = pcgr_snv_indel_tbl,
+    variant_type = "symbol",
+    variant_class = "variant_class",
+    is_somatic_matched = FALSE # total sample = 161
+)
 
-unique(pcgr_cna_data$variant_class)
+snv_indel_freq <- GetPCGRVariantFreq(
+    mat = snv_indel_mat,
+    variant_type = "symbol"
+)
 
-sample_groups <- LoadSampleGroupInfo()[1:11]
+message(
+    "Top mutated genes:\n",
+    paste(snv_indel_freq$symbol[1:30], collapse = ", ")
+)
 
-cytoband_stats <- pcgr_cna_data %>%
-    group_by(cytoband, variant_class) %>%
-    summarise(
-        n_samples = n_distinct(sample_id),
-        n_genes = n_distinct(symbol),
-        total_samples = n_distinct(pcgr_cna_data$sample_id),
-        frequency = n_samples / total_samples,
-        avg_segment_size = mean(segment_length_mb, na.rm = TRUE),
-        median_segment_size = median(segment_length_mb, na.rm = TRUE),
-        .groups = "drop"
-    ) %>%
-    arrange(desc(frequency))
+## Get the CNV tables
+pcgr_cnv_tbl <- LoadData(
+    dir = "data/processed",
+    filename = "wes_pcgr_cnv_tbl"
+)
 
-## Statistical significance testing using binomial test
-## Assume background alteration rate based on genome-wide analysis
-background_rate_gain <- 0.05  # 5% background for gains
-background_rate_loss <- 0.03  # 3% background for losses
-cytoband_stats <- cytoband_stats %>%
-    mutate(
-        background_rate = case_when(
-            variant_class == "gain" ~ background_rate_gain,
-            variant_class == "homdel" ~ background_rate_loss,
-            TRUE ~ 0.04
-        ),
-        # Binomial test for significance
-        p_value = pmap_dbl(list(n_samples, total_samples, background_rate), 
-                          function(n, total, bg) {
-                              binom.test(n, total, p = bg, alternative = "greater")$p.value
-                          }),
-        # Multiple testing correction
-        q_value = p.adjust(p_value, method = "BH")
+cn_cytoband_mat <- GetPCGRVariantMat(
+    data = pcgr_cnv_tbl,
+    variant_type = "cytoband",
+    variant_class = "cn_status",
+    is_somatic_matched = TRUE
+)
+
+cn_cytoband_freq <- GetPCGRVariantFreq(
+    mat = cn_cytoband_mat,
+    variant_type = "cytoband"
+)
+
+cn_gene_mat <- GetPCGRVariantMat(
+    data = pcgr_cnv_tbl,
+    variant_type = "symbol",
+    variant_class = "cn_status",
+    is_somatic_matched = TRUE
+)
+
+cn_gene_freq <- GetPCGRVariantFreq(
+    mat = cn_gene_mat,
+    variant_type = "symbol"
+)
+
+message(
+    "Top CNV genes:\n",
+    paste(cn_gene_freq$symbol[1:30], collapse = ", ")
+)
+
+## Find the genomic driver event for FST and metastasis
+mat_list <- list(
+    mutated_gene = snv_indel_mat,
+    cnv_cytoband = cn_cytoband_mat,
+    cnv_gene = cn_gene_mat
+)
+
+## Loop through different data type
+stat_res_list <- list()
+
+for (type in names(mat_list)) {
+
+    message(paste0("\n *Processing ", type))
+
+    if (type == "mutated_gene") {
+
+        clinical_info <- LoadClinicalInfo(is_somatic_matched = FALSE)
+        cohort_size <- nrow(clinical_info)
+
+    } else {
+
+        clinical_info <- LoadClinicalInfo(is_somatic_matched = TRUE)
+        cohort_size <- nrow(clinical_info)
+    }
+
+    if (grepl("gene", type)) {
+        
+        variant_type <- "symbol"
+
+    } else {
+
+        variant_type <- "cytoband"
+    }
+
+    ## Loop through different comparsions
+    for (gc in names(group_comparisons)) {
+        
+        message(paste0(" - ", gc))
+        
+        group1 <- group_comparisons[[gc]][["group1"]]
+        group2 <- group_comparisons[[gc]][["group2"]]
+
+        if (gc == "Pre-FST_vs_Post-FST") {
+
+            ## Paired  samples
+            group1_samples <- clinical_info |>
+                filter(Number.of.samples.per.patient >= 2) |>
+                filter(FST.Group %in% group1) |>
+                pull(Sample.ID)
+
+            group2_samples <- clinical_info |>
+                filter(Number.of.samples.per.patient >= 2) |>
+                filter(FST.Group %in% group2) |>
+                pull(Sample.ID)
+
+        } else if (gc == "Primary_vs_Metastasis") {
+            ## Get the case that have metastatsis
+            case_ids <- clinical_info |>
+                filter(Number.of.samples.per.patient >= 2) |>
+                filter(grepl("Metastasis", Specimen.Nature)) |>
+                pull(Case.ID)
+
+            group1_samples <- clinical_info |>
+                filter(Case.ID %in% case_ids) |>
+                filter(Number.of.samples.per.patient >= 2) |>
+                filter(Specimen.Nature %in% group1) |>
+                pull(Sample.ID)
+
+            group2_samples <- clinical_info |>
+                filter(Case.ID %in% case_ids) |>
+                filter(Number.of.samples.per.patient >= 2) |>
+                filter(Specimen.Nature %in% group2) |>
+                pull(Sample.ID)
+
+        } else {
+            group1_samples <- clinical_info |>
+                filter(FST.Group %in% group1) |>
+                pull(Sample.ID)
+
+            group2_samples <- clinical_info |>
+                filter(FST.Group %in% group2) |>
+                pull(Sample.ID)
+        }
+
+        ## Mutated gene level analysis
+        stat_res_list[["diff"]][[type]][[gc]] <- GetGroupStatRes(
+            mat = mat_list[[type]],
+            group1_samples = group1_samples,
+            group2_samples = group2_samples,
+            variant_type = variant_type,
+            group_comparison = gc,
+            alternative = "two.sided",
+            p_adjust_method = "BH"
+        )
+    }
+
+    ## Save the shared genes/cytobands
+    stat_res_list[["share"]][[type]] <- GetPCGRVariantFreq(
+        mat = mat_list[[type]],
+        variant_type = variant_type
+    )
+}
+
+SaveData(
+    stat_res_list,
+    dir = "data/processed",
+    filename = "wes_pcgr_snv_indels_cnv_stat_res_list"
+)
+
+## No significant genes found if use the p_adj_thres
+p_val_thres <- 0.05
+p_adj_thres <- 0.1
+min_altered_samples <- 3
+
+stat_res_sig <- list()
+for (type in names(stat_res_list$diff)) {
+
+    stat_res_sig[[type]] <- map(
+        stat_res_list$diff[[type]],
+        ~ .x |>
+            filter(fisher_p_val < p_val_thres) |>
+            # filter(fisher_p_adj < p_adj_thres) |>
+            filter(
+                group1_altered >= min_altered_samples |
+                    group2_altered >= min_altered_samples
+            )
     )
 
-## 3. Filter for significant cytobands
-significant_cytobands <- cytoband_stats %>%
-    filter(
-        q_value < 0.05,           # FDR < 5%
-        frequency >= 0.10,        # At least 10% frequency
-        n_samples >= 5            # At least 5 samples
-    ) %>%
-    arrange(q_value, desc(frequency))
-
-print("Significantly altered cytobands:")
-print(significant_cytobands)
-
-## Filter the CNA data
-pcgr_cna_data <- pcgr_cna_data |> 
-    ## Exclude the undifined variant class
-    filter(variant_class %in% c("gain", "homdel")) |> 
-    filter(sample_id %in% paired_samples)
-
-# Most frequently altered genes
-gene_freq <- pcgr_cna_data %>%
-    count(symbol, variant_class) %>%
-    arrange(desc(n)) |> 
-    filter(n >= 20)
-
-head(gene_freq, 20)
-unique(gene_freq$EVENT_TYPE)
-
-# top amplified genes
-gene_freq %>%
-    filter(EVENT_TYPE == "gain") %>%
-    top_n(20, n) %>%
-    ggplot(aes(x = reorder(SYMBOL, n), y = n)) +
-    geom_col() +
-    coord_flip() +
-    labs(title = "Top 20 Amplified Genes", x = "Gene", y = "Count")
-
-## "==========================================================================="
-## Collect PCGR SNV Indel data --------------
-## "==========================================================================="
-## Merge all PCGR outputs
-pcgr_dir <- "data/WES/PCGR"
-sheet_name <- "SOMATIC_SNV_INDEL"
-pcgr_data <- CollectPCGRSNVINDELData(dir = pcgr_dir, sheet_name = sheet_name)
-
-total_variants <- nrow(pcgr_data)
-message(paste("Total number of variants = ", total_variants))
-
-## Save the collected PCGR data
-SaveData(
-    pcgr_data, 
-    dir = data_dir, 
-    filename = "WES_PCGR_DFSP_cohort_merged_tbl"
-)
-
-##"==========================================================================="
-## Filter PCGR data --------------
-##"==========================================================================="
-pcgr_data <- LoadData(
-    dir = data_dir, 
-    filename = "WES_PCGR_DFSP_cohort_merged_tbl"
-)
-
-## Explore the threshold values for filtering
-# pcgr_data$oncogenicity |> unique()
-# pcgr_data$actionability |> unique()
-# pcgr_data |> 
-#     filter(sample_id == "DFSP-001-T") |> 
-#     filter(gnom_a_de_af <= 0.001) |>
-#     # filter(oncogenicity  %in% c("Oncogenic", "Likely_Oncogenic")) |> 
-#     filter(actionability %in% c("Potential significance"))
-#     select(
-#         sample_id, 
-#         symbol,
-#         dp_tumor, 
-#         vaf_tumor, 
-#         dp_control, 
-#         vaf_control, 
-#         gnom_a_de_af
-#     ) |> 
-#     filter(
-#         dp_tumor >= 20, 
-#         vaf_tumor >= 0.05, 
-#         dp_control >= 10, 
-#         vaf_control <= 0.01, 
-#         gnom_a_de_af <= 0.001
-#     ) 
-# pcgr_data |> 
-#     filter(dp_tumor >= min_dp_tumor & vaf_tumor >= min_vaf_tumor) |>
-#     filter(dp_control >= min_dp_control & vaf_control <= max_vaf_control) |> 
-#     filter(is.na(gnom_a_de_af) | gnom_a_de_af <= max_population_frequency)
-
-## Total variants = 7960, some samples don't have variants
-## Might be too stingent, so we will relax the thresholds
-# final_variants <- filterPCGRData(
-#     pcgr_data,
-#     min_dp_tumor = 20,
-#     min_vaf_tumor = 0.05,
-#     min_dp_control = 10,
-#     max_vaf_control = 0.01,
-#     max_population_frequency = 0.001
-# )
-
-## Total variants = 14136, all samples have variants
-final_variants <- filterPCGRData(
-    pcgr_data,
-    min_dp_tumor = 20,
-    min_vaf_tumor = 0.03,
-    min_dp_control = 10,
-    max_vaf_control = 0.01,
-    max_population_frequency = 0.001
-)
-
-## Include all indels, actionable SNVs, and oncogenic SNVs, 
-## and predictedly pathogenic SNVs
-## total_variants = 197717, all samples
-# final_variants <- filterPCGRData(
-#     pcgr_data,
-#     min_dp_tumor = NULL,
-#     min_vaf_tumor = NULL,
-#     min_dp_control = NULL,
-#     max_vaf_control = NULL,
-#     max_population_frequency = 0.001
-# )
-
-## Convert the PCGR data to a MAF format
-maf_tbl <- ConvertPCGRToMaftools(pcgr_tbl = final_variants) 
-
-## CNV facets data
-facet_dir <- "/mnt/f/projects/250224_sarcoma_multiomics/data/wes/cnv_facets"
-cnv_data <- CollectCNVFacets(facet_dir = facet_dir)
-
-## Create a MAF object
-maf_obj <- read.maf(
-    maf = maf_tbl, 
-    clinicalData = clinical_info,
-    # cnTable = cnv_data,
-    verbose = TRUE
-)
-maf_obj@variant.classification.summary
-# oncoplot(maf = maf_obj, top = 20)
+    write_xlsx(
+        stat_res_sig[[type]],
+        path = here(
+            "outputs",
+            paste0(
+                "wes_pcgr_stat_res_sig_", type, ".xlsx"
+            )
+        )
+    )
+}
 
 SaveData(
-    maf_obj, 
-    dir = data_dir, 
-    filename = "WES_PCGR_DFSP_cohort_merged_maf_obj"
+    stat_res_sig,
+    dir = "data/processed",
+    filename = "wes_pcgr_snv_indels_cnv_stat_res_sig"
+)
+
+# ## Convert the PCGR data to a MAF format
+# maf_tbl <- ConvertPCGRToMaftools(pcgr_tbl = snv_indel_filtered)
+
+# ## Create a MAF object
+# maf_obj <- read.maf(
+#     maf = maf_tbl, 
+#     clinicalData = clinical_info,
+#     # cnTable = cnv_data,
+#     verbose = TRUE
+# )
+# maf_obj@variant.classification.summary
+# # oncoplot(maf = maf_obj, top = 20)
+
+# SaveData(
+#     maf_obj, 
+#     dir = "data/processed", 
+#     filename = "wes_pcgr_DFSP_cohort_merged_snv_indels_obj"
+# )
+
+## "========================================================================="
+## Figure1 ----
+## "========================================================================="
+## 
+snv_indel_freq
+
+## Load cBioportal sarcoma data
+sarcoma_data <- LoadCBioPortalSarcomaData(
+    mutate_gene_freq_thres = 0.01,
+    cna_gene_freq_thres = 0.1,
+    structural_variants_freq_thres = 0.01
+)
+
+## Other public DFSP studies
+DFSP_study_data <- LoadDFSPStudyData()
+
+## Our study
+snv_indel_freq |> 
+    filter(freq > 0.05)
+
+
+## "==========================================================================="
+## CNV cytobands contribute to FST/Metastatsis ----
+## "==========================================================================="
+## Default to be somatic matched sampels n=147
+clinical_info <- LoadClinicalInfo()
+cohort_size <- nrow(clinical_info)
+
+## Do the analysis for both somatic matched (147) and all samples (161)
+gistic_dirs <- dir_ls(here("data/wes/GISTIC2"))
+dir_names <- path_file(gistic_dirs)
+gistic_dirs <- setNames(gistic_dirs, dir_names)
+gistic_dir <- gistic_dirs[["somatic_matched"]]
+
+## Find the recurrently altered cytobands in entire cohort
+cn_data <- GetGisticCNData(
+    gistic_dir = gistic_dir,
+    group = "all_tumors",
+    gistic_qval_thres = 0.5
+)
+
+cn_cytoband_tbl <- cn_data$cn_cytoband_tbl
+cn_gene_tbl <- cn_data$cn_gene_tbl
+
+cn_cytoband_freq <- cn_cytoband_tbl |> 
+    pivot_longer(
+        cols = -Unique_Name,
+        names_to = "Sample.ID",
+        values_to = "cn_status"
+    ) |> 
+    group_by(Unique_Name) |> 
+    summarise(
+        n_altered = sum(cn_status != ""),
+        .groups = "drop"
+    ) |> 
+    arrange(desc(n_altered)) |> 
+    mutate(freq = n_altered / cohort_size) |> 
+    filter(freq > 0.3)
+
+cn_gene_freq <- cn_gene_tbl |> 
+    pivot_longer(
+        cols = -symbol,
+        names_to = "sample_id",
+        values_to = "variant_class"
+    ) |> 
+    group_by(symbol) |> 
+    summarise(
+        n_altered = sum(variant_class != ""),
+        .groups = "drop"
+    ) |> 
+    arrange(desc(n_altered)) |> 
+    mutate(freq = n_altered / cohort_size) |> 
+    filter(freq > 0.3)
+
+## Find the cytoband driver event for FST and metastasis
+cytoband_stat_res <- list()
+cnv_gene_stat_res <- list()
+for (gc in names(group_comparisons)) {
+
+    message("Processing group comparison: ", gc)
+
+    group1 <- group_comparisons[[gc]][["group1"]]
+    group2 <- group_comparisons[[gc]][["group2"]]
+
+    if (gc == "Pre-FST_vs_Post-FST") {
+
+        ## Paired  samples
+        group1_samples <- clinical_info |> 
+            filter(Number.of.samples.per.patient >= 2) |>
+            filter(FST.Group %in% group1) |> 
+            pull(Sample.ID)
+        
+        group2_samples <- clinical_info |> 
+            filter(Number.of.samples.per.patient >= 2) |>
+            filter(FST.Group %in% group2) |> 
+            pull(Sample.ID)
+
+    } else if (gc == "Primary_vs_Metastasis") {
+        
+        ## Get the case that have metastatsis
+        case_ids <- clinical_info |> 
+            filter(Number.of.samples.per.patient >= 2) |> 
+            filter(grepl("Metastasis", Specimen.Nature)) |> 
+            pull(Case.ID)
+
+        group1_samples <- clinical_info |> 
+            filter(Case.ID %in% case_ids) |> 
+            filter(Number.of.samples.per.patient >= 2) |>
+            filter(Specimen.Nature %in% group1) |> 
+            pull(Sample.ID)
+        
+        group2_samples <- clinical_info |> 
+            filter(Case.ID %in% case_ids) |> 
+            filter(Number.of.samples.per.patient >= 2) |>
+            filter(Specimen.Nature %in% group2) |> 
+            pull(Sample.ID)
+
+    } else {
+
+        group1_samples <- clinical_info |> 
+            filter(FST.Group %in% group1) |> 
+            pull(Sample.ID)
+        
+        group2_samples <- clinical_info |> 
+            filter(FST.Group %in% group2) |> 
+            pull(Sample.ID)
+    }
+
+    message(" - Performing cytoband analysis ... ")
+    cytoband_stat_res[[gc]] <- GetGisticCytobandGroupStatRes(
+        cn_cytoband_tbl = cn_cytoband_tbl,
+        group1_samples = group1_samples,
+        group2_samples = group2_samples,
+        group_comparison = gc,
+        alternative = "two.sided",
+        p_adjust_method = "BH"
+    )
+
+    message(paste0(" - Performing CNV gene analysis ... \n"))
+    cnv_gene_stat_res[[gc]] <- GetGisticCNVGeneGroupStatRes(
+        cn_gene_tbl = cn_gene_tbl,
+        group1_samples = group1_samples,
+        group2_samples = group2_samples,
+        group_comparison = gc,
+        alternative = "two.sided",
+        p_adjust_method = "BH"
+    )
+}
+
+sig_cytoband <- map(
+    cytoband_stat_res,
+    ~ .x |> 
+        filter(fisher_p_value < p_val_thres) |> 
+        # filter(fisher_p_adj < p_adj_thres) |> 
+        # filter(fisher_p_value < p_value_thres) |> 
+        filter(
+                group1_altered >= min_altered_samples |
+                group2_altered >= min_altered_samples
+        )
+)
+
+sig_cnv_gene <- map(
+    cnv_gene_stat_res,
+    ~ .x |> 
+        filter(fisher_p_value < p_val_thres) |> 
+        # filter(fisher_p_adj < p_adj_thres) |> 
+        # filter(fisher_p_value < p_value_thres) |> 
+        filter(
+                group1_altered >= min_altered_samples |
+                group2_altered >= min_altered_samples
+        )
+)
+
+SaveData(
+    cytoband_stat_res,
+    dir = "data/processed",
+    filename = "wes_cnvfacets_gistic2_group_comparisons_stat_res_all"
+)
+
+write_xlsx(
+    cytoband_stat_res,
+    path = here(
+        "outputs",
+        "wes_cnvfacets_gistic2_group_comparisons_stat_res_all.xlsx"
+    )
 )
 
 ## "========================================================================="
 ## Mutated genes and variants summary  ----
 ## "========================================================================="
 maf_obj <- LoadData(
-    dir = data_dir, 
-    filename = "WES_PCGR_DFSP_cohort_merged_maf_obj"
+    dir = "data/processed", 
+    filename = "wes_pcgr_DFSP_cohort_merged_snv_indels_obj"
 )
 
 ## Get the summary of mutated genes
@@ -361,8 +555,8 @@ tmb_data <- as_tibble(tmb_data)
 ## Save the TMB data
 SaveData(
     tmb_data, 
-    dir = data_dir, 
-    filename = "WES_PCGR_DFSP_cohort_tmb"
+    dir = "data/processed", 
+    filename = "wes_pcgr_tmb_data"
 )
 
 ## "==========================================================================="
@@ -701,57 +895,23 @@ dev.off()
 ## "========================================================================="
 ## Oncoplot public cohort mutated genes ----
 ## "========================================================================="
-## Public cohorts of sarcoma from cBioPortal
-cbioportal_sarcoma_genes <- "data/public/cBioPortal_sarcoma_mutated_genes.txt"
-cbioportal_sarcoma_genes <- read.table(
-    here(cbioportal_sarcoma_genes), 
-    header = FALSE, 
-    skip = 1,
-    # sep = "\t", 
-    stringsAsFactors = FALSE
-)
-colnames <- c(
-    "Gene", "# Mut", "#", "Profiled Samples", "Freq", 
-    "Is Cancer Gene (source: OncoKB)"
+## Cbioportal sarcoma data
+sarcoma_data <- LoadCBioPortalSarcomaData(
+    mutate_gene_freq_thres = 0.01,
+    cna_gene_freq_thres = 0.1,
+    structural_variants_freq_thres = 0.01
 )
 
-## Get the > 1% mutated genes
-cbioportal_sarcoma_genes <- as_tibble(cbioportal_sarcoma_genes) |> 
-    setNames(colnames) |> 
-    select(Gene, Freq) |>
-    mutate(Freq = str_replace(Freq, "<", "")) |>
-    mutate(Freq = str_replace(Freq, "%", "")) |>
-    mutate(Freq = as.numeric(Freq)) |>
-    arrange(desc(Freq)) |> 
-    filter(Freq > 1)
+## Other public DFSP studies
+DFSP_study_data <- LoadDFSPStudyData()
 
-## DFSP-peng_2022 (https://doi.org/10.1111/bjd.20976)
-## smith_2025 (10.1016/j.modpat.2025.100737)
-dfsp_public_cohorts <- list(
-    cbioportal_sarcoma = list(
-        title = "Top mutated genes (cBioPortal Sarcoma, Freq > 1%)",
-        snv_indel = cbioportal_sarcoma_genes$Gene
-    ),
-    smith_2025 = list(
-        title = "Top mutated genes (Smith et al. 2025 Reported, n=53)",
-        snv_indel = c(
-            "FANCC", "TERT", "CHEK2", 
-            "KMT2D", "BRIP1", "ERCC2", "KMT2A", 
-            "MGA", "MTOR", "PTEN", "RAD50",
-            "RIT1", "TP53"
-        )
-    ),
-    peng_2022 = list(
-        title = "Top mutated genes (Peng et al. 2022 Reported, n=59)",
-        snv_indel = c(
-            "MUC6", "MUC4", "KMT2C", 
-            "HERC2", "HLA-A", "PRSS3", "PDE4DIP", 
-            "PRSS1", "RBMXL1", "BRCA1", "CTBP2",
-            "HLA-B", "HLA-DQA2", "LILRA6", "OR8U1", 
-            "PABPC1", "PCSK1", "ZXDB"
-        )
-    )
-)
+## Our study
+snv_indel_freq |> 
+    filter(freq > 0.05)
+
+## Oncoplot the cytobands
+cn_data
+cn_freq
 
 ## Overlap genes between our cohort and smith_2025
 all_mut_genes <- gene_summary |> 
@@ -965,7 +1125,6 @@ SavePlot(
     dir = plot_dir
 )
 
-
 plot <- peng_2022_freq |> 
     bind_rows(
         our_cohort_freq |> filter(
@@ -1138,7 +1297,7 @@ mut_gene_tbl <- bitr(
     distinct()
 
 ## signature gene set
-fgsea_sets <- loadMsigdbGeneSet() |> cleanGeneSetName()
+fgsea_sets <- LoadMsigdbGeneSet() |> cleanGeneSetName()
 fgsea_sets <- split(fgsea_sets$gene_symbol, fgsea_sets$gs_name)
 
 ## GSEA multilevel

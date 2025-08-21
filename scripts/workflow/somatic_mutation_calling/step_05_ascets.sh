@@ -12,40 +12,13 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/conf/config.sh"
 
+ASCETS_DIR=/mnt/f/projects/250224_sarcoma_multiomics/data/wes/ASCETS
 ## Create the output directory
-mkdir -p "${PCGR_DIR}"
+mkdir -p "${ASCETS_DIR}"
+segment_file=
 
-## ===========================================================================
-## General configurations
-## ===========================================================================
-
-## Create PCGR-compatible PON if it doesn't exist
-if [ ! -f "${PON_PCGR}" ]; then
-    echo " - Creating PCGR-compatible PoN VCF..."
-    { 
-        bcftools view -h "${PON}" | head -n -1
-        echo '##INFO=<ID=PANEL_OF_NORMALS,Number=0,Type=Flag,Description="Overlap with germline call among panel of normals">'
-        bcftools view -h "${PON}" | tail -n 1
-        bcftools view -H "${PON}" | awk 'BEGIN{OFS="\t"} {
-            if ($8 == ".") {
-                $8 = "PANEL_OF_NORMALS"
-            } else {
-                $8 = $8 ";PANEL_OF_NORMALS"
-            }
-            print $0
-        }'
-    } | bgzip > "${PON_PCGR}" && tabix -p vcf "${PON_PCGR}"
-    echo " - PCGR-compatible PoN created: ${PON_PCGR}"
-fi
-
-# bcftools view -h "${PON_PCGR}" | grep -i "^##"
-# bcftools view -h "${PON_PCGR}" | head -20
-# bcftools view -h "${PON_PCGR}" | grep -i "^#CHROM"
-# bcftools view -h "${PON}" | grep -i "^##"
-
-
-## Function to run PCGR annotation
-pcgr_annotation() {
+## Function to run ASCETS CNV arm level analysis 
+ascet() {
     
     local tumour_id=$1
 

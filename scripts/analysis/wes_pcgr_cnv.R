@@ -22,162 +22,116 @@ source(here::here("conf/study_conf.R"))
 ## "==========================================================================="
 ## Preprocess PCGR CNV data --------------
 ## "==========================================================================="
-## Merge all PCGR outputs
-pcgr_dir <- "data/wes/PCGR"
-pcgr_cna_raw <- CollectPCGRCNAData(dir = pcgr_dir)
 
-unique(pcgr_cna_raw$event_type)
-unique(pcgr_cna_raw$variant_class)
-length(unique(pcgr_cna_raw$sample_id))
-pcgr_cna_raw |> 
-    filter(variant_class != "undefined") |> 
-    pull(sample_id) |> 
-    unique() |> 
-    length()
-
-## Save the raw PCGR CNV data
-SaveData(
-    pcgr_cna_raw, 
-    dir = "data/processed", 
-    filename = "wes_pcgr_DFSP_cohort_cnv_raw_data"
-)
-
-## Load the PCGR annotated CNV data
-pcgr_cna_raw <- LoadData(
-    dir = "data/processed", 
-    filename = "wes_pcgr_DFSP_cohort_cnv_raw_data"
-)
-
-## Load the CNV facets data
-cnv_facet_raw <- LoadData(
-    dir = "data/processed",
-    filename = "wes_cnv_facets_DFSP_cohort_raw"
-)
-
-## 5 samples do not have facet estimated purity
-## DFSP-042-T, DFSP-060-T, DFSP-331-T, DFSP-341-T, DFSP-354-T
-cnv_facet_raw |> 
-    filter(is.na(purity) | is.na(ploidy)) |> 
-    select(sample, purity, ploidy) |> 
-    distinct()
-
-## Define the CNV events
-## 10.1016/j.jtho.2021.02.023
-pcgr_cna_tbl <- pcgr_cna_raw |> 
-    separate_wider_delim(
-            var_id, 
-            delim = ":", 
-            names = c(
-                "CHROM", "position_range", "cn_major_parsed", "cn_minor_parsed"
-            ),
-            cols_remove = FALSE
-    ) |> 
-    select(-cn_major_parsed, -cn_minor_parsed) |>
-    separate_wider_delim(
-        position_range, 
-        names = c("POS", "END"), 
-        delim = "-", 
-        cols_remove = FALSE
-    ) |> 
-    left_join(
-        cnv_facet_raw |> 
-            select(sample, CHROM, POS, END, SVTYPE, ploidy, purity),
-        by = c("sample_id" = "sample", "CHROM", "POS", "END")
-    ) |> 
-    select(-CHROM, -POS, -END) |>
-    mutate(
-        ploidy = as.numeric(ploidy),
-        purity = as.numeric(purity)
-    ) |> 
-    dplyr::rename(
-        facet_svtype = SVTYPE,
-        facet_ploidy = ploidy,
-        facet_purity = purity
-    ) |> 
-    relocate(
-        matches("facet"), .after = variant_class
-        # facet_svtype, facet_ploidy, facet_purity, 
-    ) |> 
-    ## Define the CNV events
-    mutate(
-        cn_status = case_when(
-            ## "Deep deletion"
-            !is.na(facet_ploidy) & total_cn == 0 ~ "HOMDEL",
-            
-            ## Deletion
-            !is.na(facet_ploidy) & (total_cn -facet_ploidy) <= -1 ~ "DEL",
-            
-            ## Neutral
-            !is.na(facet_ploidy) & 
-                ((total_cn -facet_ploidy) > -1) &
-                ((total_cn -facet_ploidy) < 1) ~ "NEUTRAL",
-            
-            ## Amplification
-            !is.na(facet_ploidy) & 
-                ((total_cn - facet_ploidy) >= 1) &
-                ((total_cn - facet_ploidy) < 3) ~ "GAIN",
-
-            ## Deep amplification
-            !is.na(facet_ploidy) & (total_cn - facet_ploidy) >=3 ~ "AMP",
-        ),
-        .after = variant_class
-    ) |> 
-    ## Keep only changed CNV events
-    dplyr::filter(cn_status != "NEUTRAL") |> 
-    separate_wider_delim(
-        position_range,
-        names = c("start", "end"),
-        delim = "-"
-    ) |> 
-    mutate(
-        chrom = str_extract(var_id, "chr[0-9XY]+"), .after = "sample_id",
-        start = as.integer(start),
-        end = as.integer(end)
-    ) |> 
-    mutate(
-        cytoband_alteration = paste0(cytoband, "_", cn_status),
-        .after = cn_status
-    ) |> 
-    mutate(
-        gene_alteration = paste0(symbol, "_", cn_status),
-        .after = symbol
-    ) |> 
-    arrange(desc(facet_ploidy))
-
-## One sample do not have non-neutral CNA: "DFSP-169-T"
-length(unique(pcgr_cna_tbl$sample_id))
-setdiff(pcgr_cna_raw$sample_id, pcgr_cna_tbl$sample_id)
-
-## Save the filtered Non-Neutral PCGR CNV data
-SaveData(
-    pcgr_cna_tbl,
-    dir = "data/processed",
-    filename = "wes_pcgr_DFSP_cohort_cnv_filtered"
-)
 
 ## "========================================================================="
 ## Different and shared cytobands---- 
 ## "========================================================================="
-pcgr_cna_tbl <- LoadData(
+pcgr_cnv_tbl <- LoadData(
     dir = "data/processed",
-    filename = "wes_pcgr_DFSP_cohort_cnv_filtered"
+    filename = "wes_pcgr_cnv_tbl"
 )
 
 ## Analyze the somatic matched samples
-clinical_info <- LoadClinicalInfo() |>
-    filter(Somatic.Status %in% c("Matched"))
+clinical_info <- LoadClinicalInfo()
+cohort_size <- clinical_info |> nrow()
 
-cohort_total_samples <- clinical_info |> nrow()
+pcgr_cytoband_tbl <- pcgr_cnv_tbl |> 
+    group_by(sample_id, cytoband) |> 
+    summarise(
+        variant_class = paste(unique(cn_status), collapse = ","),
+        .groups = "drop"
+    ) |> 
+    pivot_wider(
+        names_from = sample_id,
+        values_from = variant_class,
+        values_fill = ""
+    )
 
-cna_data <- pcgr_cna_tbl |> 
+pcgr_cytoband_stat_res <- list()
+for (gc in names(group_comparisons)) {
+
+    group1 <- group_comparisons[[gc]][["group1"]]
+    group2 <- group_comparisons[[gc]][["group2"]]
+
+    if (gc == "Pre-FST_vs_Post-FST") {
+
+        ## Paired  samples
+        group1_samples <- clinical_info |> 
+            filter(Number.of.samples.per.patient >= 2) |>
+            filter(FST.Group %in% group1) |> 
+            pull(Sample.ID)
+        
+        group2_samples <- clinical_info |> 
+            filter(Number.of.samples.per.patient >= 2) |>
+            filter(FST.Group %in% group2) |> 
+            pull(Sample.ID)
+
+    } else if (gc == "Primary_vs_Metastasis") {
+        
+        ## Get the case that have metastatsis
+        case_ids <- clinical_info |> 
+            filter(Number.of.samples.per.patient >= 2) |> 
+            filter(grepl("Metastasis", Specimen.Nature)) |> 
+            pull(Case.ID)
+
+        group1_samples <- clinical_info |> 
+            filter(Case.ID %in% case_ids) |> 
+            filter(Number.of.samples.per.patient >= 2) |>
+            filter(Specimen.Nature %in% group1) |> 
+            pull(Sample.ID)
+        
+        group2_samples <- clinical_info |> 
+            filter(Case.ID %in% case_ids) |> 
+            filter(Number.of.samples.per.patient >= 2) |>
+            filter(Specimen.Nature %in% group2) |> 
+            pull(Sample.ID)
+
+    } else {
+
+        group1_samples <- clinical_info |> 
+            filter(FST.Group %in% group1) |> 
+            pull(Sample.ID)
+        
+        group2_samples <- clinical_info |> 
+            filter(FST.Group %in% group2) |> 
+            pull(Sample.ID)
+    }
+
+    pcgr_cytoband_stat_res[[gc]] <- GetGroupStatRes(
+        data = pcgr_cytoband_tbl,
+        group1_samples = group1_samples,
+        group2_samples = group2_samples,
+        group_comparison = gc,
+        alternative = "two.sided",
+        p_adjust_method = "BH"
+    )
+}
+
+data <- cytoband_tbl
+group1 <- "U-DFSP"
+group2 <- "FS-DFSP"
+
+group1_samples <- clinical_info |> 
+    filter(FST.Group %in% group1) |> 
+    pull(Sample.ID)
+        
+group2_samples <- clinical_info |> 
+    filter(FST.Group %in% group2) |> 
+    pull(Sample.ID)
+
+group_comparison <- "U-DFSP_vs_FS-DFSP"
+
     filter(sample_id %in% clinical_info$Sample.ID) |> 
     left_join(clinical_info, by = c("sample_id" = "Sample.ID")) |> 
     relocate(FST.Group, .after = sample_id)
 
 ## Get the significantly different cytobands across groups
 all_diff_cytobands <- map_dfr(
-    group_comparisons,
+    FST_group_comparisons,
     function(comp) {
+        message(paste0(" - Processing ", comp$name))
+
         GetPCGRCNVGroupDiffCytoband(
             data = cna_data,
             var = "FST.Group",
@@ -191,8 +145,22 @@ all_diff_cytobands <- map_dfr(
             group_comparison = comp$name
         )
     }
-)
+) |>
+    mutate(
+        cytoband_alteration = paste0(cytoband, "_", cn_status),
+        .after = "cn_status"
+    )
 
+all_diff_cytobands <- all_diff_cytobands |> 
+    mutate(
+        chrom = sapply(str_split(cytoband, ":"), function(x) x[1]),
+        .before = "cytoband"
+    ) |> 
+    mutate(chrom = str_replace(chrom, "chr", "")) |> 
+    filter(!(chrom %in% c("X", "Y"))) |>
+    mutate(chrom = as.numeric(chrom))
+
+## Fisher exact test p value threshold
 p_val_thres <- 0.05
 
 ## At least 15% samples are mutated
@@ -201,16 +169,86 @@ freq_thres <- 0.15
 sig_diff_cytobands <- all_diff_cytobands |> 
     filter(fisher_p < p_val_thres) |>
     filter(group1_freq > freq_thres | group2_freq > freq_thres) |>
-    mutate(cytoband_alteration = paste0(cytoband, "_", cn_status)) |> 
     group_by(cytoband_alteration, cytoband, cn_status) |> 
     summarise(
         n_comparisons_present = n(),
         comparisons_present = paste(group_comparison, collapse = ", "),
-        mean_genes_affected = mean(n_genes_affected, na.rm = TRUE),
-        mean_segment_size = mean(mean_segment_size, na.rm = TRUE),
         .groups = "drop"
     ) |> 
-    arrange(desc(n_comparisons_present))
+    arrange(desc(n_comparisons_present)) |> 
+        mutate(
+        chrom = sapply(str_split(cytoband, ":"), function(x) x[1]),
+        .before = "cytoband"
+    ) |> 
+    mutate(chrom = str_replace(chrom, "chr", "")) |> 
+    filter(!(chrom %in% c("X", "Y"))) |>
+    mutate(chrom = as.numeric(chrom))
+
+## Test some peaks
+selected_peaks <- c(
+    ## U-DFSP -> Pre-FST
+    "chr7:q36.1_DEL",
+    "chr17:q21.33-q22_AMP",
+    "chr22:q11.21-q11.23_GAIN",
+
+    ## Pre-FST -> Post-FST
+    "chr17:q23.1-q22_GAIN",
+    "chr19:q13.41-q13.33_DEL",
+
+    ## U-DFSP -> Post-FST
+    "chr1:p36.33_DEL",
+    "chr14:q32.33_DEL",
+    "chr17:q21.2_DEL",
+    "chr20:q13.33_DEL",
+
+    ## Pre-FST -> FS-DFSP
+    "chr16:p13.3_GAIN",
+    "chr17:p12-p13.1_GAIN",
+    "chr2:q37.3_DEL",
+    "chr6:p22.1_DEL",
+
+    ## Post-FST -> FS-DFSP
+    "chr17:q25.3_GAIN",
+    "chr19:p13.11_DEL",
+    "chr19:q13.12-q13.11_DEL",
+    "chr7:p22.3_GAIN",
+
+    ## U-DFSP -> FS-DFSP
+    "chr14:q11.2-q12_DEL",
+    "chr22:q11.21-q11.23_AMP",
+    "chr2:p25.1_HOMDEL",
+    "chr5:q31.3_GAIN",
+    "chr9:p21.3_HOMDEL",
+
+    ## U-DFSP -> Pre-FST
+    "chr1:p36.32_DEL",
+    "chr1:p36.33_DEL",
+    "chr2:p25.1_HOMDEL",
+    "chr2:q37.3_DEL",
+    "chr3:q27.1_DEL",
+    "chr5:p15.33_GAIN",
+    "chr5:q31.3_AMP",
+    "chr5:q31.3_GAIN",
+    "chr6:p21.33-p21.32_HOMDEL",
+    "chr6:p22.1-p21.33_DEL",
+    "chr6:q21_DEL",
+    "chr6:q22.2-q23.2_DEL",
+    "chr6:p22.1_DEL",
+    "chr7:q22.1_AMP",
+    "chr7:p22.3_GAIN",
+    "chr7:q36.1_DEL"
+)
+
+all_diff_cytobands |> 
+    filter(fisher_p < p_val_thres) |>
+    filter(group1_freq > freq_thres | group2_freq > freq_thres) |> 
+    filter(
+        cytoband_alteration %in% c(
+            "chr7:q36.1_DEL",
+            "chr17:q21.33-q22_AMP",
+            "chr22:q11.21-q11.23_GAIN"
+        )
+    )
 
 ## Get the shared cytobands across groups
 shared_cytobands <- GetPCGRCNVGroupShareCytoband(
@@ -220,6 +258,18 @@ shared_cytobands <- GetPCGRCNVGroupShareCytoband(
     somatic_matched = TRUE,
     min_freq_per_group = 0.3
 )
+
+shared_cytobands$shared_cytobands <- shared_cytobands$shared_cytobands |> 
+    mutate(
+        chrom = sapply(
+            str_split(cytoband, ":"), 
+            function(x) x[1]
+        ),
+        .after = "cytoband"
+    ) |> 
+    mutate(chrom = str_replace(chrom, "chr", "")) |> 
+    filter(!(chrom %in% c("X", "Y"))) |>
+    mutate(chrom = as.numeric(chrom))
 
 ## Save the cytoband stat data
 SaveData(
@@ -244,131 +294,8 @@ write_xlsx(
     )
 )
 
-## "==========================================================================="
-## Chromosomal plot cytobands --------------
-## "==========================================================================="
-## Load the cytoband stat res
-cytoband_stat_res <- LoadPCGRCytobandStatData()
-
-all_diff_cytobands <- cytoband_stat_res$all_diff_cytobands 
-
-all_diff_cytobands <- all_diff_cytobands |> 
-    filter(fisher_p < p_value_thres) |> 
-    filter(group1_freq > freq_thres | group2_freq > freq_thres) |> 
-    mutate(cytoband_alteration = paste0(cytoband, "_", cn_status))
-
-peak_label_list <- list(
-    
-    "U-DFSP" = all_diff_cytobands |> 
-        filter(
-            group_comparison %in% c("U-DFSP_vs_Pre-FST")
-        ) |> 
-        pull(cytoband_alteration) |> 
-        unique(),
-        
-    "Pre-FST" = all_diff_cytobands |> 
-        filter(
-            group_comparison %in% c("U-DFSP_vs_Pre-FST")
-        ) |> 
-        pull(cytoband_alteration) |> 
-        unique(),
-
-    "Post-FST" = all_diff_cytobands |> 
-        filter(
-            group_comparison %in% c(
-                "U-DFSP_vs_Post-FST",
-                "U-DFSP_vs_FS-DFSP",
-                "Pre-FST_vs_Post-FST",
-                "Pre-FST_vs_FS-DFSP",
-                "Post-FST_vs_FS-DFSP",
-                "U-DFSP+Pre-FST_vs_Post-FST+FS-DFSP"
-            )
-        ) |> 
-        pull(cytoband_alteration) |> 
-        unique(),
-    
-    "FS-DFSP" = all_diff_cytobands |> 
-        filter(
-            group_comparison %in% c(
-                "U-DFSP_vs_Post-FST",
-                "U-DFSP_vs_FS-DFSP",
-                "Pre-FST_vs_Post-FST",
-                "Pre-FST_vs_FS-DFSP",
-                "Post-FST_vs_FS-DFSP",
-                "U-DFSP+Pre-FST_vs_Post-FST+FS-DFSP"
-            )
-        ) |> 
-        pull(cytoband_alteration) |> 
-        unique()
-)
-
-# peak_label <- c("chr7:q36.1_DEL", "chr6:p21.33_HOMDEL")
-
-gistic_dir <- "data/wes/GISTIC2/somatic_matched"
-
-plots <- list()
-for (group in FST.Group) {
-    
-    ## Load the gistic score
-    gistic_score <- LoadGisticScore(
-        gistic_dir = gistic_dir,
-        group = group
-    )
-
-    ## the sample info in entire cohort
-    n_samples <- LoadClinicalInfo() |> 
-        filter(Somatic.Status == "Matched") |> 
-        filter(FST.Group == group) |> 
-        nrow()
-
-    peak_label <- peak_label_list[[group]]
-    
-    ## Get the peak coordinates
-    peaks_data <- GetPCGRGisticOverlap2(
-        peak_label = peak_label,
-        pcgr_cna_data = cna_data, 
-        gistic_score_data = gistic_score,
-        min_overlap = 0.1
-    )
-
-    peaks_data <- AddPeaksPCGRCountData(
-        peaks_data,
-        pcgr_cna_data = cna_data,
-        var = "FST.Group",
-        group = group,
-        is_somatic_matched = TRUE
-    )
-
-    ## Plot the enriched regions
-    plots[[group]] <- GisticChromPlot(
-        data = gistic_score,
-        peaks_data = peaks_data,
-        y_lim = c(-2, 3),
-        x_expand = c(0.02, 0),
-        title = paste0(group, " (", n_samples, ")"),
-        show_horizontal_grid = TRUE,
-        show_vertical_grid = TRUE,
-        grid_line_type = "dotted",
-        grid_line_color = "grey80",
-        grid_line_alpha = 0.5,
-        grid_line_width = 0.2,
-        show_chromosome_ideogram = FALSE,
-        ideogram_label_size = 4,
-        rel_heights = c(4, 0.3)
-    )
-}
-
-SavePlot(
-    plot = wrap_plots(plots, ncol = 2) +
-        plot_layout(guides = "collect"),
-    width = 12,
-    height = 5,
-    dir = "figures/gistic2",
-    filename = "wes_facet_pcgr_DFSP_cohort_gistic_plots_FST.Group"
-)
-
 ## "========================================================================"
-## Oncoplot cytobands ----
+## Cytobands oncoplot ----
 ## "========================================================================"
 ## Cytoband freq data
 cytoband_freq <- cna_data |> 
@@ -383,6 +310,17 @@ cytoband_freq <- cna_data |>
         cohort_freq = n_samples_altered / cohort_total_samples
     ) |> 
     arrange(desc(cohort_freq))
+
+all_diff_cytobands |> 
+    filter(fisher_p < p_val_thres) |>
+    filter(
+        cytoband  %in% c(
+            # "chr5:p15.33"
+            "chr9:p21.3"
+            # "chr22:q13.1-q12.3"
+        )
+    ) |> 
+    filter(group_comparison == "U-DFSP_vs_FS-DFSP")
 
 ## Prepare the oncoplot data
 cytoband_oncoplot_data <- cna_data  |> 
@@ -410,6 +348,9 @@ cytoband_oncoplot_data <- cna_data  |>
 
 ## Select the cytobands to plot
 selected_cytobands <- all_diff_cytobands |> 
+    filter(fisher_p < p_val_thres) |> 
+    filter(group1_freq > freq_thres | group2_freq > freq_thres) |> 
+    mutate(cytoband_alteration = paste0(cytoband, "_", cn_status)) |> 
     pull(cytoband) |> 
     unique()
 
@@ -443,25 +384,46 @@ dim(onco_mat)
 
 ## Plot the oncoplot
 plot_para <- list(
-    entire_cohort_FST_group  = list(
+    entire_cohort  = list(
         sample_sorted_by = "FST.Group",
-        sample_sorted_level = c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP")
+        sample_sorted_level = c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP"),
+        sample_annotation = c(
+            "FST.Group", "Specimen.Nature", "Metastasis",
+            "Meth.Subtype.Main.2Class", "HRD.cat", "MSI.cat"
+        )
     ),
     paired_samples = list(
         sample_sorted_by = NULL,
-        sample_sorted_level = NULL
+        sample_sorted_level = NULL,
+        sample_annotation = c(
+            "FST.Group", "Specimen.Nature", "Metastasis", 
+            "Meth.Subtype.Main.2Class", "HRD.cat", "MSI.cat"
+        )
     ),
     EPIC_meth_group = list(
         sample_sorted_by = "Meth.Subtype.Main.2Class",
-        sample_sorted_level = c("Meth1", "Meth2")
+        sample_sorted_level = c("Meth1", "Meth2"),
+        sample_annotation = c(
+            "Meth.Subtype.Main.2Class", 
+            "FST.Group", "Specimen.Nature", "Metastasis", 
+            "HRD.cat", "MSI.cat"
+        )
     ),
     HRD_group = list(
         sample_sorted_by = "HRD.cat",
-        sample_sorted_level = c("High", "Low")
+        sample_sorted_level = c("Low", "High"),
+        sample_annotation = c(
+            "HRD.cat", "FST.Group", "Specimen.Nature", "Metastasis", 
+            "Meth.Subtype.Main.2Class", "MSI.cat"
+        )
     ),
     MSI_group = list(
         sample_sorted_by = "MSI.cat",
-        sample_sorted_level = c("High", "Low")
+        sample_sorted_level = c("Low", "High"),
+        sample_annotation = c(
+            "MSI.cat", "FST.Group", "Specimen.Nature", "Metastasis",
+            "Meth.Subtype.Main.2Class", "HRD.cat"
+        )
     )
 )
 
@@ -469,11 +431,6 @@ sample_info <- LoadClinicalInfo() |>
     filter(Somatic.Status == "Matched")
 
 for (i in names(plot_para)) {
-
-    filename <- paste0(
-        "wes_cnvfacets_pcgr_oncoplot_somatic_matched_sort_by_", 
-        plot_para[[i]]$sample_sorted_by
-    )
 
     ## all samples
     all_sample_ids <- colnames(onco_mat)
@@ -483,39 +440,62 @@ for (i in names(plot_para)) {
         sample_ids <- sample_info |> 
             filter(grepl("Paired", Histology.Nature)) |> 
             pull(Sample.ID)
-
-        sample_ids <- all_sample_ids[all_sample_ids %in% sample_ids]
         
-        n_samples <- length(sample_ids)
+        samples <- all_sample_ids[all_sample_ids %in% sample_ids]
+
+        n_samples <- length(samples)
+
+        column_title <- paste0(
+                "Somatic matched samples, N = ", n_samples, ", Paired samples only",
+                "\n", "(Sorted by Case.ID)"
+        )
+
+        filename <- "wes_cnvfacets_pcgr_oncoplot_somatic_matched_cytobands_paired_only"
 
     } else if (i == "EPIC_meth_group") {
 
         sample_ids <- sample_info |> 
             filter(!is.na(Meth.Subtype.Main.2Class)) |> 
             pull(Sample.ID)
+        
+        samples <- all_sample_ids[all_sample_ids %in% sample_ids]
 
-        sample_ids <- all_sample_ids[all_sample_ids %in% sample_ids]
+        n_samples <- length(samples)
 
-        n_samples <- length(sample_ids)
+        column_title <- paste0(
+                "Somatic matched samples, N = ", n_samples,
+                "\n", "(Sorted by ", plot_para[[i]]$sample_sorted_by, ")"
+        )
+
+        filename <- paste0(
+            "wes_cnvfacets_pcgr_oncoplot_somatic_matched_cytobands_", 
+            plot_para[[i]]$sample_sorted_by
+        )
+
+    } else {
+    
+        samples <- all_sample_ids
+        
+        n_samples <- length(samples)
+
+        column_title <- paste0(
+                "Somatic matched samples, N = ", n_samples,
+                "\n", "(Sorted by ", plot_para[[i]]$sample_sorted_by, ")"
+        )
+
+        filename <- paste0(
+            "wes_cnvfacets_pcgr_oncoplot_somatic_matched_cytobands_", 
+            plot_para[[i]]$sample_sorted_by
+        )
     }
-
-    column_title <- paste0(
-            "Somatic matched samples, N = ", n_samples,
-            "\n", "(Sorted by ", plot_para[[i]]$sample_sorted_by, ")"
-    )
-
-    ## Subset the matrix
-    mat <- onco_mat[, sample_ids, drop = FALSE]
-
-    sample_annotation <- c(
-        "FST.Group", "Metastasis", "Specimen.Nature",
-        "Meth.Subtype.Main.2Class", "HRD.cat", "MSI.cat"
-    )
+    
+    ## Subset the matrix according to groups
+    mat <- onco_mat[, samples, drop = FALSE]
     
     ## Plot the oncoplot
     PCGRComplexOncoplot(
         mat = mat,
-        sample_annotation = sample_annotation,
+        sample_annotation = plot_para[[i]]$sample_annotation,
         sample_sorted_by = plot_para[[i]]$sample_sorted_by,
         sample_sorted_level = plot_para[[i]]$sample_sorted_level,
         column_title = column_title,
@@ -526,11 +506,121 @@ for (i in names(plot_para)) {
     )
 }
 
+## "==========================================================================="
+## Cytoband chromosomal plot --------------
+## "==========================================================================="
+# peak_label_list <- list(
+    
+#     "U-DFSP" = all_diff_cytobands |> 
+#         filter(
+#             group_comparison %in% c("U-DFSP_vs_Pre-FST")
+#         ) |> 
+#         pull(cytoband_alteration) |> 
+#         unique(),
+        
+#     "Pre-FST" = all_diff_cytobands |> 
+#         filter(
+#             group_comparison %in% c("U-DFSP_vs_Pre-FST")
+#         ) |> 
+#         pull(cytoband_alteration) |> 
+#         unique(),
+
+#     "Post-FST" = all_diff_cytobands |> 
+#         filter(
+#             group_comparison %in% c(
+#                 "U-DFSP_vs_Post-FST",
+#                 "U-DFSP_vs_FS-DFSP",
+#                 "Pre-FST_vs_Post-FST",
+#                 "Pre-FST_vs_FS-DFSP",
+#                 "Post-FST_vs_FS-DFSP",
+#                 "U-DFSP+Pre-FST_vs_Post-FST+FS-DFSP"
+#             )
+#         ) |> 
+#         pull(cytoband_alteration) |> 
+#         unique(),
+    
+#     "FS-DFSP" = all_diff_cytobands |> 
+#         filter(
+#             group_comparison %in% c(
+#                 "U-DFSP_vs_Post-FST",
+#                 "U-DFSP_vs_FS-DFSP",
+#                 "Pre-FST_vs_Post-FST",
+#                 "Pre-FST_vs_FS-DFSP",
+#                 "Post-FST_vs_FS-DFSP",
+#                 "U-DFSP+Pre-FST_vs_Post-FST+FS-DFSP"
+#             )
+#         ) |> 
+#         pull(cytoband_alteration) |> 
+#         unique()
+# )
+
+gistic_dir <- "data/wes/GISTIC2/somatic_matched"
+
+plots <- list()
+for (group in FST.Group) {
+    
+    ## Load the gistic score
+    gistic_score <- LoadGisticScore(
+        gistic_dir = gistic_dir,
+        group = group
+    )
+
+    ## the sample info in entire cohort
+    n_samples <- LoadClinicalInfo() |> 
+        filter(Somatic.Status == "Matched") |> 
+        filter(FST.Group == group) |> 
+        nrow()
+
+    # peak_label <- peak_label_list[[group]]
+    
+    ## Get the peak coordinates
+    peaks_data <- GetPCGRGisticOverlap2(
+        peak_label = selected_peaks,
+        pcgr_cna_data = cna_data, 
+        gistic_score_data = gistic_score,
+        min_overlap = 0.1
+    )
+
+    peaks_data <- AddPeaksPCGRCountData(
+        peaks_data,
+        pcgr_cna_data = cna_data,
+        var = "FST.Group",
+        group = group,
+        is_somatic_matched = TRUE
+    )
+
+    ## Plot the enriched regions
+    plots[[group]] <- GisticChromPlot(
+        data = gistic_score,
+        peaks_data = peaks_data,
+        y_lim = c(-2, 3),
+        x_expand = c(0.02, 0),
+        title = paste0(group, " (", n_samples, ")"),
+        show_horizontal_grid = TRUE,
+        show_vertical_grid = TRUE,
+        grid_line_type = "dotted",
+        grid_line_color = "grey80",
+        grid_line_alpha = 0.5,
+        grid_line_width = 0.2,
+        show_chromosome_ideogram = TRUE,
+        ideogram_label_size = 4,
+        rel_heights = c(4, 0.3)
+    )
+}
+
+SavePlot(
+    plot = wrap_plots(plots, ncol = 2) +
+        plot_layout(guides = "collect"),
+    width = 12,
+    height = 5,
+    dir = "figures/chromplot",
+    filename = "wes_facet_pcgr_DFSP_cohort_gistic_plots_FST.Group"
+)
 
 ## "========================================================================="
-## Different and shared genes -------
+## Different and shared CNV genes -------
 ## "========================================================================="
-pcgr_cna_tbl <- LoadData(
+pcgr_cnv_tbl <- LoadData(
     dir = "data/processed",
     filename = "wes_pcgr_DFSP_cohort_cnv_filtered"
 )
@@ -541,7 +631,7 @@ clinical_info <- LoadClinicalInfo() |>
 
 cohort_total_samples <- clinical_info |> nrow()
 
-cna_data <- pcgr_cna_tbl |> 
+cna_data <- pcgr_cnv_tbl |> 
     filter(sample_id %in% clinical_info$Sample.ID) |> 
     left_join(clinical_info, by = c("sample_id" = "Sample.ID")) |> 
     relocate(FST.Group, .after = sample_id) |> 
@@ -552,7 +642,7 @@ cna_data <- pcgr_cna_tbl |>
 
 ## Get the significantly different genes across groups
 all_diff_genes <- map_dfr(
-    group_comparisons,
+    FST_group_comparisons,
     function(comp) {
         GetPCGRCNVGroupDiffGene(
             data = cna_data,
@@ -568,6 +658,10 @@ all_diff_genes <- map_dfr(
         )
     }
 )
+
+all_diff_genes |> 
+    filter(symbol %in% c("RB1", "TP53")) |> 
+    filter(fisher_p < p_val_thres)
 
 sig_diff_genes <- all_diff_genes |> 
     filter(fisher_p < p_val_thres) |>
@@ -614,7 +708,7 @@ write_xlsx(
 )
 
 ## "========================================================================"
-## Oncoplot CNV genes puclic cohort ----
+## CNV genes oncoplot public cohort ----
 ## "========================================================================"
 ## Calculate the frequency for all CNV genes
 gene_freq <- cna_data |>
@@ -713,7 +807,9 @@ dfsp_public_cohorts <- list(
 ## Genes to plot
 selected_genes <- c(
     dfsp_public_cohorts$smith_2025$cnv,
-    dfsp_public_cohorts$peng_2022$cnv
+    dfsp_public_cohorts$peng_2022$cnv,
+    ## well known oncodriver gene
+    "TP53", "PDGFRB", "AKT"
 ) |> 
     unique()
 
@@ -753,13 +849,146 @@ column_title <- paste0(
 )
 
 filename <- paste0(
-    "wes_cnvfacets_pcgr_oncoplot_public_cohort_CNV_genes_somatic_matched_sort_by_", 
+    "wes_cnvfacets_pcgr_oncoplot_public_DFSP_cohort_CNV_genes_somatic_matched_", 
     sample_sorted_by
 )
 
 PCGRComplexOncoplot(
     mat = onco_mat,
-    sample_annotation = c("FST.Group", "Metastasis", "Specimen.Nature"),
+    sample_annotation = c(
+        "FST.Group", "Metastasis", "Specimen.Nature",
+        "Meth.Subtype.Main.2Class", "HRD.cat", "MSI.cat"
+    ),
+    sample_sorted_by = sample_sorted_by,
+    sample_sorted_level = sample_sorted_level,
+    column_title = column_title,
+    width = 20,
+    height = 10,
+    dir = "figures/oncoplot",
+    filename = filename
+)
+
+## "========================================================================"
+## CNV HRD genes oncoplot ----
+## "========================================================================"
+## Genes to plot
+selected_genes <- HRD_genes
+
+## Construct the oncoplot data
+onco_data <- expand_grid(
+    sample_id = clinical_info$Sample.ID,
+    symbol = selected_genes
+) |> 
+    left_join(
+        gene_oncoplot_data |> select(-alterations), 
+        by = c("sample_id", "symbol")
+    ) |> 
+    arrange(final_alteration)
+
+onco_mat <- onco_data |> 
+    mutate(
+        final_alteration = if_else(
+            is.na(final_alteration), "", final_alteration
+        )
+    ) |> 
+    ## Handle duplicates by keeping distinct combinations
+    distinct(sample_id, symbol, .keep_all = TRUE) |>
+    pivot_wider(
+        names_from = sample_id,
+        values_from = final_alteration,
+        values_fill = ""
+    ) |>
+    column_to_rownames("symbol") |>
+    as.matrix()
+
+## Plot the oncoplot
+sample_sorted_by <- "FST.Group"
+sample_sorted_level <- c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP")
+# sample_sorted_by <- "HRD.cat"
+# sample_sorted_level <- c("Low", "High")
+sample_annotation = c(
+    "FST.Group", "Specimen.Nature", "Metastasis", 
+    "Meth.Subtype.Main.2Class", "MSI.cat", "HRD.cat"
+)
+
+column_title <- paste0(
+    "Somatic matched samples, N = ", cohort_total_samples, 
+    "\n", "HRD genes"
+)
+
+filename <- paste0(
+    "wes_cnvfacets_pcgr_oncoplot_CNV_HRD_genes_somatic_matched_", 
+    sample_sorted_by
+)
+
+PCGRComplexOncoplot(
+    mat = onco_mat,
+    sample_annotation = sample_annotation,
+    sample_sorted_by = sample_sorted_by,
+    sample_sorted_level = sample_sorted_level,
+    column_title = column_title,
+    width = 20,
+    height = 10,
+    dir = "figures/oncoplot",
+    filename = filename
+)
+
+## "========================================================================"
+## CNV MMR genes oncoplot ----
+## "========================================================================"
+## Genes to plot
+selected_genes <- MMR_genes
+
+## Construct the oncoplot data
+onco_data <- expand_grid(
+    sample_id = clinical_info$Sample.ID,
+    symbol = selected_genes
+) |> 
+    left_join(
+        gene_oncoplot_data |> select(-alterations), 
+        by = c("sample_id", "symbol")
+    ) |> 
+    arrange(final_alteration)
+
+onco_mat <- onco_data |> 
+    mutate(
+        final_alteration = if_else(
+            is.na(final_alteration), "", final_alteration
+        )
+    ) |> 
+    ## Handle duplicates by keeping distinct combinations
+    distinct(sample_id, symbol, .keep_all = TRUE) |>
+    pivot_wider(
+        names_from = sample_id,
+        values_from = final_alteration,
+        values_fill = ""
+    ) |>
+    column_to_rownames("symbol") |>
+    as.matrix()
+
+## Plot the oncoplot
+sample_sorted_by <- "FST.Group"
+sample_sorted_level <- c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP")
+# sample_sorted_by <- "MSI.cat"
+# sample_sorted_level <- c("Low", "High")
+sample_annotation = c(
+    "MSI.cat", "FST.Group", "Specimen.Nature", "Metastasis",
+    "Meth.Subtype.Main.2Class", "HRD.cat"
+)
+
+column_title <- paste0(
+    "Somatic matched samples, N = ", cohort_total_samples, 
+    "\n", "MMR genes"
+)
+
+filename <- paste0(
+    "wes_cnvfacets_pcgr_oncoplot_CNV_MMR_genes_somatic_matched_", 
+    sample_sorted_by
+)
+
+PCGRComplexOncoplot(
+    mat = onco_mat,
+    sample_annotation = sample_annotation,
     sample_sorted_by = sample_sorted_by,
     sample_sorted_level = sample_sorted_level,
     column_title = column_title,
