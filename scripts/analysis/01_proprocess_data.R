@@ -8,7 +8,7 @@
 source(here::here("conf/study_conf.R"))
 
 ## "==========================================================================="
-## Process EPIC CNV data for GISTIC2 input ----
+## Preprocess EPIC CNV data for GISTIC2 input ----
 ## "==========================================================================="
 epic_cnv_data <- read_tsv(
     here("data/epic/GISTIC2/all_tumors/all_tumors.tsv"),
@@ -57,7 +57,7 @@ for (sample_group in names(sample_groups)) {
 }
 
 ## "==========================================================================="
-## Preprocess WES CNV Facet data  ----
+## Preprocess WES CNV Facets data  ----
 ## "==========================================================================="
 cnv_facet_dir <- here("data/wes/CNV/cnv_facets")
 
@@ -71,6 +71,23 @@ message(
     )
 )
 
+## The following 14 samples are tumour samples without matched normal, 
+## the outputs were generate using DFSP-336-N:
+## DFSP-030-T-P1
+## DFSP-030-T-P2
+## DFSP-031-T
+## DFSP-032-T
+## DFSP-037-T
+## DFSP-051-T-P1
+## DFSP-051-T-P2
+## DFSP-072-T
+## DFSP-106-T
+## DFSP-112-T
+## DFSP-123-T
+## DFSP-150-T
+## DFSP-170-T
+## DFSP-171-T
+
 cnv_facet_raw <- tibble(
     sample = sample_names,
     file = tsv_files
@@ -81,7 +98,7 @@ cnv_facet_raw <- tibble(
             sample,
             \(f, s) {
                 message(
-                    paste0("Loading CNV Facets data = ", s)
+                    paste0(" *Loading CNV Facets data = ", s)
                 )
                 dat <- read_tsv(
                     f, 
@@ -99,33 +116,32 @@ cnv_facet_raw <- tibble(
 SaveData(
     cnv_facet_raw,
     dir = "data/processed",
-    filename = "wes_cnv_facets_DFSP_cohort_raw"
+    filename = "wes_cnv_facets_raw"
 )
 
-## "==========================================================================="
-## Export CNV facet purity, ploidy data ----
-## "==========================================================================="
-cnv_facet_raw |> 
-    select(sample, purity, ploidy, dipLogR, est_insert_size, emflags) |>
-    distinct() |> 
-    arrange(sample) |>
-    write_xlsx(
-        here("outputs", "wes_cnv_facet_DFSP_cohort_purity_ploidy.xlsx"),
-    )
-
+## Export CNV facet purity, ploidy data
 clinical_info <- LoadClinicalInfo()
-matched_samples <- clinical_info |> 
-    filter(Somatic.Status == "Matched") |>
-    pull(Sample.ID)
-
-cnv_facet_raw |> 
+purity_ploidy_data <- cnv_facet_raw |> 
     select(sample, purity, ploidy, dipLogR, est_insert_size, emflags) |>
     distinct() |> 
-    arrange(dipLogR) |> 
-    # filter(sample %in% matched_samples) |> 
-    filter(is.na(purity) | is.na(ploidy)) 
+    arrange(sample) |> 
+    filter(sample %in% clinical_info$Sample.ID)
 
-cnv_facet_raw |> pull(SVTYPE) |> unique() |> sort()
+write_csv(
+    purity_ploidy_data,
+    here("outputs", "wes_cnv_facet_purity_ploidy.csv")
+)
+
+## Within the somatic samples (147), 5 samples have missing purity or ploidy values
+## DFSP-042-T
+## DFSP-060-T
+## DFSP-331-T
+## DFSP-341-T
+## DFSP-354-T
+missed_purity_ploidy <- purity_ploidy_data |> 
+    filter(is.na(purity) | is.na(ploidy))
+
+print(missed_purity_ploidy)
 
 ## "==========================================================================="
 ## Prepare WES CNV data for GISTIC2 input ----
@@ -204,7 +220,7 @@ sample_groups <- LoadSampleGroupInfo(
 
 write_tsv(
     gistic2_data,
-    file = here("outputs/wes_cnv_facets_DFSP_cohort_gistic2.tsv"),
+    file = here("outputs/wes_cnv_facets_gistic2_input_data.tsv"),
     na = "NA",
     quote = "none"
 )
@@ -424,7 +440,7 @@ SaveData(
 )
 
 ## "==========================================================================="
-## Preprocess ASCETS CNV data --------------
+## Preprocess ASCETS CNV arm data --------------
 ## "==========================================================================="
 ## https://github.com/beroukhim-lab/ascets
 ## Get the hg38 cytoband data
@@ -445,24 +461,110 @@ write_tsv(
     quote = "none"
 )
 
-source(here(ascet_dir, "ascets_resources.R"))
-cna <- read_tsv("/mnt/f/projects/250224_sarcoma_multiomics/data/wes/CNV/cnv_facets/DFSP-010-T-P1/DFSP-010-T-P1.ascets.seg") |> 
-as.data.frame()
-cytoband <- read_tsv(here(ascet_dir, "cytoband_coordinates_hg38.txt")) |> 
-    as.data.frame()
-
-ascets_output <- ascets(
-    cna = cna,
-    cytoband = cytoband,
-    min_boc = 0.5,
-    name = "DFSP-010-T-P1",
-    keep_noisy = FALSE,
-    threshold = 0.2,
-    alteration_threshold = 0.7
+## Prepare the data for ASCETS analysis
+required_input_cols <- c(
+    "sample", "CHROM", "POS", "END", "NUM_MARK", "CNLR_MEDIAN"
 )
-names(ascets_output)
-ascets_output$calls
-write_outputs_to_file(ascets_output, location = "output_folder/")
+
+clinical_info <- LoadClinicalInfo()
+cnv_facet_raw <- LoadData(
+    dir = "data/processed",
+    filename = "wes_cnv_facets_raw"
+)
+
+## Convert to custom format
+cnv_facet_data <- cnv_facet_raw |>
+    dplyr::filter(sample %in% clinical_info$Sample.ID) |>
+    dplyr::filter(SVTYPE != "NEUTR") |>
+    ## The not estimateable Lesser (minor) copy number segments were filtered out
+    dplyr::filter(!(LCN_EM %in% c(".", NA, "NA"))) |>
+    dplyr::select(all_of(required_input_cols)) |>
+    dplyr::rename(
+        chrom = CHROM,
+        segment_start = POS,
+        segment_end = END,
+        num_mark = NUM_MARK,
+        log2ratio = CNLR_MEDIAN
+    ) |>
+    mutate(
+        chrom = str_replace(chrom, "chr", ""),
+        segment_start = as.integer(segment_start),
+        segment_end = as.integer(segment_end)
+    ) |>
+    ## Make sure the the segments to be start < end
+    mutate(
+        segment_start_fixed = if_else(
+            segment_start > segment_end, segment_end, segment_start
+        ),
+        segment_end_fixed = if_else(
+            segment_start > segment_end, segment_start, segment_end
+        )
+    ) |>
+    dplyr::select(
+        sample,
+        chrom,
+        segment_start = segment_start_fixed, 
+        segment_end = segment_end_fixed,
+        num_mark, log2ratio
+    ) |>
+    ## Keep data types consistent
+    mutate(
+        chrom = as.character(chrom),
+        segment_start = as.integer(segment_start),
+        segment_end = as.integer(segment_end),
+        num_mark = as.integer(num_mark),
+        log2ratio = as.numeric(log2ratio)
+    )
+
+## Run ASCET arm level analysis
+source(here(ascet_dir, "ascets_resources.R"))
+hg38_cytoband <- read_tsv(
+    file = here(ascet_dir, "cytoband_coordinates_hg38.txt"),
+    show_col_types = FALSE
+)
+
+ascets_input <- split(
+    cnv_facet_data, 
+    cnv_facet_data$sample
+)
+
+## Loop through the samples
+ascets_arm_raw <- map(
+    ascets_input,
+    \(df) {
+        message(paste0("\nProcessing ", unique(df$sample)))
+
+        ascets_output <- ascets(
+            cna = df,
+            cytoband = hg38_cytoband,
+            min_boc = 0.5,
+            name = "DFSP-010-T-P1",
+            keep_noisy = FALSE,
+            threshold = 0.2,
+            alteration_threshold = 0.7
+        )
+    },
+    .progress = TRUE
+)
+
+SaveData(
+    ascets_arm_raw,
+    dir = "data/processed/",
+    filename = "wes_cnv_facets_ascets_arm_raw"
+)
+
+## Aneuploidy scores
+ascets_aneuploidy_scores <- map_dfr(
+    ascets_arm_raw,
+    \(sample) {
+        df <- sample[["aneu_scores"]]
+    }
+)
+
+write_csv(
+    ascets_aneuploidy_scores,
+    file = here("outputs/wes_cnv_facets_ascets_aneuploidy_scores.csv")
+)
 
 ## "==========================================================================="
 ## SNV/Indel genes contribute to FST/Metastatsis --------------

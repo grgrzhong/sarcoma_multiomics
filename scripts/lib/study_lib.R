@@ -1517,6 +1517,7 @@ CollectPCGRCNVData <- function(
     ## Loop through the files and read the data
     for (file in pcgr_files) {
 
+        # file <- pcgr_files[[1]]
         message(" - Processing: ", file)
         
         if (!file.exists(file)) {
@@ -1531,9 +1532,9 @@ CollectPCGRCNVData <- function(
                 .after = cn_minor
             )
         
-        # cna_data |> 
-        #     select(sample_id, var_id, cn_major, cn_minor, variant_class) |>
-        #     distinct()
+        cna_data |> 
+            select(sample_id, var_id, cn_major, cn_minor, variant_class) |>
+            distinct()
 
         # if (!is.null(sig_gain_thres)) {
         #     cna_data <- cna_data |>
@@ -6738,7 +6739,72 @@ GetPCGRVariantMat <- function(
     variant_mat
 }
 
-GetPCGRVariantFreq <- function(
+GetVariantMat <- function(
+    data,
+    variant_type = "symbol",
+    variant_class = "variant_class",
+    is_somatic_matched = TRUE
+) {
+
+    ## Load clincial info
+    clinical_info <- LoadClinicalInfo(is_somatic_matched = is_somatic_matched)
+
+    all_samples <- unique(clinical_info$Sample.ID)
+
+    ## Keep releveant data
+    cur_data <- data |> filter(sample_id %in% all_samples)
+
+    cur_samples <- unique(cur_data$sample_id)
+
+    missed_sample <- setdiff(clinical_info$Sample.ID, cur_samples)
+
+    ## Save a clearned data: row=gene name, column=sample_id
+    variant_tbl <- cur_data |> 
+        group_by(sample_id, !!sym(variant_type)) |>
+        summarise(
+            variant_class = paste(
+                unique(!!sym(variant_class)), collapse = ","
+            ),
+            .groups = "drop"
+        ) |> 
+        pivot_wider(
+            names_from = sample_id,
+            values_from = variant_class,
+            values_fill = ""
+        )
+
+    if (length(missed_sample) > 0) {
+    
+        message(
+            paste0(" - No variants could be found for these samples: ")
+        )
+        message(
+            paste0(" > ", missed_sample, collapse = "\n")
+        )
+
+        ## Add the missed sample
+        for (i in missed_sample) {
+            variant_tbl <- variant_tbl |> 
+                add_column(!!i := "")
+        }
+    }
+
+    variant_mat <- variant_tbl |> 
+        column_to_rownames(var = variant_type) |>
+        as.matrix()
+    
+    ## print out the dimension
+    n_sample <- ncol(variant_mat)
+    n_variant <- nrow(variant_mat)
+
+    message(
+        paste0(" - samples: ", n_sample, ", variants: ", n_variant)
+    )
+
+    variant_mat
+}
+
+GetVariantFreq <- function(
     mat,
     variant_type = "symbol"
 ) {

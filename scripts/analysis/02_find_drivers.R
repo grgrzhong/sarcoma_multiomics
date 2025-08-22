@@ -16,14 +16,15 @@ pcgr_snv_indel_tbl <- LoadData(
     filename = "wes_pcgr_snv_indels_tbl"
 )
 
-snv_indel_mat <- GetPCGRVariantMat(
+## DFSP-087-T no Indels/SNV found
+snv_indel_mat <- GetVariantMat(
     data = pcgr_snv_indel_tbl,
     variant_type = "symbol",
     variant_class = "variant_class",
     is_somatic_matched = FALSE # total sample = 161
 )
 
-snv_indel_freq <- GetPCGRVariantFreq(
+snv_indel_freq <- GetVariantFreq(
     mat = snv_indel_mat,
     variant_type = "symbol"
 )
@@ -39,26 +40,27 @@ pcgr_cnv_tbl <- LoadData(
     filename = "wes_pcgr_cnv_tbl"
 )
 
-cn_cytoband_mat <- GetPCGRVariantMat(
+## DFSP-169-T, no CNV found
+cn_cytoband_mat <- GetVariantMat(
     data = pcgr_cnv_tbl,
     variant_type = "cytoband",
     variant_class = "cn_status",
     is_somatic_matched = TRUE
 )
 
-cn_cytoband_freq <- GetPCGRVariantFreq(
+cn_cytoband_freq <- GetVariantFreq(
     mat = cn_cytoband_mat,
     variant_type = "cytoband"
 )
 
-cn_gene_mat <- GetPCGRVariantMat(
+cn_gene_mat <- GetVariantMat(
     data = pcgr_cnv_tbl,
     variant_type = "symbol",
     variant_class = "cn_status",
     is_somatic_matched = TRUE
 )
 
-cn_gene_freq <- GetPCGRVariantFreq(
+cn_gene_freq <- GetVariantFreq(
     mat = cn_gene_mat,
     variant_type = "symbol"
 )
@@ -68,11 +70,72 @@ message(
     paste(cn_gene_freq$symbol[1:30], collapse = ", ")
 )
 
+## Get the CNV arm level data
+ascets_arm_raw <- LoadData(
+    dir = "data/processed/",
+    filename = "wes_cnv_facets_ascets_arm_raw"
+)
+
+hg38_cytoband <- read_tsv(
+    file = here(ascet_dir, "cytoband_coordinates_hg38.txt"),
+    show_col_types = FALSE
+)
+
+## CNV arm matrix
+ascets_arm_tbl <- map_dfr(
+    ascets_arm_raw,
+    \(sample) {
+        df <- sample[["calls"]]
+        df |> 
+            pivot_longer(
+                cols = -sample,
+                names_to = "arm",
+                values_to = "variant_class"
+            ) |> 
+            dplyr::rename(sample_id = sample) |> 
+            dplyr::filter(
+                !(variant_class %in% c(
+                        ## insufficient data or coverage)
+                        "NC",
+                        ## low coverage, not enough data to make a reliable call
+                        "LOWCOV",
+                        ## no significant copy-number alteration
+                        "NEUTRAL"
+                    )
+                )
+            ) |> 
+            ## Combine the chromosome and arm information
+            left_join(
+                hg38_cytoband |> select(arm, chrom),
+                by = "arm"
+            ) |> 
+            mutate(
+                arm = paste0("chr", chrom, ":", arm)
+            ) |> 
+            select(-chrom)
+    }
+)
+
+## DFSP-042-T, no arm found
+cn_arm_mat <- GetVariantMat(
+    data = ascets_arm_tbl,
+    variant_type = "arm",
+    variant_class = "variant_class",
+    is_somatic_matched = TRUE
+)
+cn_arm_mat[1:5, 1:5]
+
+cn_arm_freq <- GetVariantFreq(
+    mat = cn_arm_mat,
+    variant_type = "arm"
+)
+
 ## Find the genomic driver event for FST and metastasis
 mat_list <- list(
     mutated_gene = snv_indel_mat,
     cnv_cytoband = cn_cytoband_mat,
-    cnv_gene = cn_gene_mat
+    cnv_gene = cn_gene_mat,
+    cnv_arm = cn_arm_mat
 )
 
 ## Loop through different data type
@@ -97,9 +160,14 @@ for (type in names(mat_list)) {
         
         variant_type <- "symbol"
 
-    } else {
+    } else if (grepl("arm", type)) {
 
+        variant_type <- "arm"
+
+    } else {
+        
         variant_type <- "cytoband"
+
     }
 
     ## Loop through different comparsions
@@ -165,17 +233,11 @@ for (type in names(mat_list)) {
     }
 
     ## Save the shared genes/cytobands
-    stat_res_list[["share"]][[type]] <- GetPCGRVariantFreq(
+    stat_res_list[["share"]][[type]] <- GetVariantFreq(
         mat = mat_list[[type]],
         variant_type = variant_type
     )
 }
-
-SaveData(
-    stat_res_list,
-    dir = "data/processed",
-    filename = "wes_pcgr_snv_indels_cnv_stat_res_list"
-)
 
 ## No significant genes found if use the p_adj_thres
 p_val_thres <- 0.05
@@ -189,22 +251,34 @@ for (type in names(stat_res_list$diff)) {
         stat_res_list$diff[[type]],
         ~ .x |>
             filter(fisher_p_val < p_val_thres) |>
-            # filter(fisher_p_adj < p_adj_thres) |>
+            filter(fisher_p_adj < p_adj_thres) |>
             filter(
                 group1_altered >= min_altered_samples |
                     group2_altered >= min_altered_samples
             )
     )
 
-    write_xlsx(
-        stat_res_sig[[type]],
-        path = here(
-            "outputs",
-            paste0(
-                "wes_pcgr_stat_res_sig_", type, ".xlsx"
-            )
-        )
-    )
+    output_dir <- "outputs/group_comparison"
+    dir_create(here(output_dir))
+
+    # ## Save signficant results
+    # write_xlsx(
+    #     stat_res_sig[[type]],
+    #     path = here(
+    #         output_dir,
+    #         paste0("wes_group_comparison_stat_res_sig_", type, ".xlsx")
+    #     )
+        
+    # )
+
+    # ## Save all results
+    # write_xlsx(
+    #     stat_res_list$diff[[type]],
+    #     path = here(
+    #         output_dir,
+    #         paste0("wes_group_comparison_stat_res_all_", type, ".xlsx")
+    #     )
+    # )
 }
 
 SaveData(
