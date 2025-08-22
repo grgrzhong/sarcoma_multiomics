@@ -18,6 +18,7 @@ results/
 outputs/
 figures/
 reports/
+scripts/modules/ascets/
 
 # Common genomic data formats
 *.bam
