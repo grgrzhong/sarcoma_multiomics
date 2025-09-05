@@ -8741,155 +8741,193 @@ GetPycloneInputData <- function(
 
     data_list <- list()
 
-    for (sample_id in all_sample_ids) {
+    data_list <- mclapply(
+        all_sample_ids, 
+        function(sample_id) {
 
-        message(
-            paste0(" - Processing ", sample_id)
-        )
-
-        ## Prepare the snv/indel data
-        cur_data <- snv_indel_data |>
-            filter(sample_id == !!sample_id) |>
-            dplyr::select(
-                sample_id, genomic_change, variant_class, symbol
-            ) |>
-            mutate(
-                chrom = paste0(
-                    "chr", str_extract(genomic_change, "^[0-9XY]+")
-                ),
-                pos = as.integer(
-                    str_extract(genomic_change, "(?<=:g\\.)[0-9]+")
-                )
-            ) |>
-            mutate(
-                mutation = sapply(
-                    genomic_change,
-                    function(x) str_split(x, "g.")[[1]][[2]]
-                ),
-                ## remove the coordinates
-                mutation = str_replace_all(
-                    mutation, "^[0-9]+", ""
-                )
-            ) |>
-            separate_wider_delim(
-                mutation,
-                names = c("ref", "alt"),
-                delim = ">",
-                cols_remove = TRUE
+            message(
+                paste0(" - Processing ", sample_id)
             )
 
-        ## Load the FACETS setgment data
-        segment_file <- here(
-            cnv_facet_dir, sample_id, paste0(sample_id, ".tsv")
-        )
-
-        segment_data <- read_tsv(segment_file, show_col_types = FALSE) |>
-            clean_names() |>
-            dplyr::select(
-                chrom, pos, end, tcn_em, lcn_em, purity, svtype, emflags
-            ) |>
-            mutate(
-                major_cn = as.integer(round(tcn_em - lcn_em)),
-                minor_cn = as.integer(round(lcn_em)),
-            ) |>
-            filter(!is.na(lcn_em)) |>
-            dplyr::mutate(
-                start_fixed = if_else(pos > end, end, pos),
-                end_fixed = if_else(pos > end, pos, end)
-            ) |>
-            dplyr::select(
-                chrom,
-                start = start_fixed, end = end_fixed,
-                major_cn, minor_cn, tcn_em, lcn_em, purity, svtype, emflags
-            ) |>
-            mutate(total_cn = major_cn + minor_cn, .after = minor_cn) |>
-            distinct(chrom, start, end, .keep_all = TRUE)
-
-        ## Retrieve the mutation ref and var counts
-        vcf_file <- here(
-            vcf_dir, sample_id, paste0(sample_id, ".final.vcf.gz")
-        )
-
-        vcf_data <- readVcf(vcf_file, "hg38")
-
-        vcf_tbl <- tibble(
-            CHROM = as.character(seqnames(vcf_data)),
-            POS = as.integer(start(vcf_data)),
-            REF = as.character(ref(vcf_data)),
-            ALT = as.character(unlist(alt(vcf_data))),
-            AD = geno(vcf_data)$AD,
-            GT = geno(vcf_data)$GT
-        ) |>
-            mutate(
-                # genomic_change = paste0(
-                #     str_remove(CHROM, "^chr"), ":", "g.",
-                #     POS, REF, ">", ALT
-                # ),
-                ref_counts = sapply(AD[, sample_id], function(x) x[1]), # Tumor ref_counts
-                var_counts = sapply(AD[, sample_id], function(x) x[2]), # Tumor alt_counts
-                genotype = GT[, sample_id]
-            ) |>
-            clean_names() |>
-            dplyr::select(
-                # genomic_change,
-                chrom, pos, ref, alt, ref_counts, var_counts, genotype
-            )
-
-        pyclone_data <- cur_data |>
-            # dplyr::select(sample_id, genomic_change) |>
-            ## retrive the ref and alt counts
-            left_join(
-                vcf_tbl,
-                by = c("chrom", "pos", "ref", "alt")
-            ) |>
-            mutate(
-                major_cn = 1, # Default
-                minor_cn = 1, # Default
-                normal_cn = 2, # Default for autosomes
-            )
-
-        ## Map mutations to FACETS segments
-        for (i in seq_len(nrow(pyclone_data))) {
-            mutation_id <- pyclone_data$genomic_change[i]
-
-            chromosome <- pyclone_data$chrom[i]
-            pos <- pyclone_data$pos[i]
-
-            segment <- segment_data |>
-                filter(chrom == chromosome, start <= pos, end >= pos) |>
-                mutate(
-                    segment_width = end - start
+            ## Prepare the snv/indel data
+            cur_data <- snv_indel_data |>
+                filter(sample_id == !!sample_id) |>
+                dplyr::select(
+                    sample_id, genomic_change, variant_class, symbol
                 ) |>
-                arrange(segment_width)
-
-            if (nrow(segment) > 0) {
-                message(
-                    paste0("   - Found ", nrow(segment), " matching segments for mutation ", mutation_id)
-                )
-                message(
-                    paste0(
-                        "   - Mapped mutation ", mutation_id,
-                        " to segment: ", segment$chrom[1], ":",
-                        segment$start[1], "-", segment$end[1],
-                        " (", segment$major_cn[1], "/", segment$minor_cn[1], ")"
+                mutate(
+                    chrom = paste0(
+                        "chr", str_extract(genomic_change, "^[0-9XY]+")
+                    ),
+                    pos = as.integer(
+                        str_extract(genomic_change, "(?<=:g\\.)[0-9]+")
                     )
+                ) |>
+                mutate(
+                    mutation = sapply(
+                        genomic_change,
+                        function(x) str_split(x, "g.")[[1]][[2]]
+                    ),
+                    ## remove the coordinates
+                    mutation = str_replace_all(
+                        mutation, "^[0-9]+", ""
+                    )
+                ) |>
+                separate_wider_delim(
+                    mutation,
+                    names = c("ref", "alt"),
+                    delim = ">",
+                    cols_remove = TRUE
                 )
 
-                pyclone_data$major_cn[[i]] <- segment$major_cn[[1]]
-                pyclone_data$minor_cn[[i]] <- segment$minor_cn[[1]]
-            }
-        }
-
-        ## Clean the outputs
-        data_list[[sample_id]]  <- pyclone_data |>
-            mutate(
-                mutation_id = paste0(chrom, ":", pos, ":", ref, ">", alt)
-            ) |>
-            dplyr::select(
-                mutation_id, ref_counts, var_counts, normal_cn,
-                minor_cn, major_cn, sample_id, genotype
+            ## Load the FACETS setgment data
+            segment_file <- here(
+                cnv_facet_dir, sample_id, paste0(sample_id, ".tsv")
             )
-    }
+
+            segment_data <- read_tsv(segment_file, show_col_types = FALSE) |>
+                clean_names() |>
+                dplyr::select(
+                    chrom, pos, end, tcn_em, lcn_em, purity, svtype, emflags
+                ) |>
+                mutate(
+                    major_cn = as.integer(round(tcn_em - lcn_em)),
+                    minor_cn = as.integer(round(lcn_em)),
+                ) |>
+                filter(!is.na(lcn_em)) |>
+                dplyr::mutate(
+                    start_fixed = if_else(pos > end, end, pos),
+                    end_fixed = if_else(pos > end, pos, end)
+                ) |>
+                dplyr::select(
+                    chrom,
+                    start = start_fixed, end = end_fixed,
+                    major_cn, minor_cn, tcn_em, lcn_em, purity, svtype, emflags
+                ) |>
+                mutate(total_cn = major_cn + minor_cn, .after = minor_cn) |>
+                distinct(chrom, start, end, .keep_all = TRUE)
+
+            ## Retrieve the mutation ref and var counts
+            vcf_file <- here(
+                vcf_dir, sample_id, paste0(sample_id, ".final.vcf.gz")
+            )
+
+            vcf_data <- suppressWarnings(readVcf(vcf_file, "hg38"))
+
+            vcf_tbl <- tibble(
+                CHROM = as.character(seqnames(vcf_data)),
+                POS = as.integer(start(vcf_data)),
+                REF = as.character(ref(vcf_data)),
+                ALT = as.character(unlist(alt(vcf_data))),
+                AD = geno(vcf_data)$AD,
+                GT = geno(vcf_data)$GT
+            ) |>
+                mutate(
+                    # genomic_change = paste0(
+                    #     str_remove(CHROM, "^chr"), ":", "g.",
+                    #     POS, REF, ">", ALT
+                    # ),
+                    ref_counts = sapply(AD[, sample_id], function(x) x[1]), # Tumor ref_counts
+                    var_counts = sapply(AD[, sample_id], function(x) x[2]), # Tumor alt_counts
+                    vcf_genotype = GT[, sample_id],
+                    ## Convert the VCF genotype to PyClone genotype
+                    genotype = case_when(
+                            vcf_genotype %in% c("0/0", "0|0") ~ "AA",
+                            vcf_genotype %in% c("0/1", "1/0", "0|1", "1|0") ~ "AB",
+                            vcf_genotype %in% c("1/1", "1|1") ~ "BB",
+                            vcf_genotype %in% c("0/2", "2/0", "0|2", "2|0") ~ "AC",  # Multi-allelic
+                            vcf_genotype %in% c("1/2", "2/1", "1|2", "2|1") ~ "BC",  # Multi-allelic
+                            vcf_genotype %in% c("2/2", "2|2") ~ "CC",  # Multi-allelic homozygous
+                            vcf_genotype %in% c("./.", ".|.", ".") ~ "AB",  # Missing
+                            TRUE ~ "AB"  # Default
+                    )
+                ) |>
+                clean_names() |>
+                dplyr::select(
+                    # genomic_change,
+                    chrom, pos, ref, alt, ref_counts, var_counts, genotype, vcf_genotype
+                )
+
+            pyclone_data <- cur_data |>
+                # dplyr::select(sample_id, genomic_change) |>
+                ## retrive the ref and alt counts
+                left_join(
+                    vcf_tbl,
+                    by = c("chrom", "pos", "ref", "alt")
+                ) |>
+                mutate(
+                    major_cn = 2, # Default
+                    minor_cn = 0, # Default
+                    normal_cn = 2, # Default for autosomes
+                )
+
+            ## Map mutations to FACETS segments
+            for (i in seq_len(nrow(pyclone_data))) {
+
+                mutation_id <- pyclone_data$genomic_change[i]
+
+                chromosome <- pyclone_data$chrom[i]
+                pos <- pyclone_data$pos[i]
+
+                segment <- segment_data |>
+                    filter(chrom == chromosome, start <= pos, end >= pos) |>
+                    mutate(
+                        segment_width = end - start
+                    ) |>
+                    arrange(segment_width)
+
+                if (nrow(segment) > 0) {
+                    major_cn <- segment$major_cn[[1]]
+                    
+                    minor_cn <- segment$minor_cn[[1]]
+                    
+                    ## Ensure major_cn is always > 0
+                    if (is.na(major_cn) || major_cn <= 0) {
+                        major_cn <- 1  # Default to 1 if invalid
+                    }
+
+                    if (is.na(minor_cn) || minor_cn < 0) {
+                        minor_cn <- 0  # Default to 1 if invalid
+                    }
+
+                    message(
+                        paste0(" - Found ", nrow(segment), " matching segments for mutation ", mutation_id)
+                    )
+                    message(
+                        paste0(
+                            "   - Mapped mutation ", mutation_id,
+                            " to segment: ", segment$chrom[1], ":",
+                            segment$start[1], "-", segment$end[1],
+                            " (", segment$major_cn[1], "/", segment$minor_cn[1], ")"
+                        )
+                    )
+
+                    pyclone_data$major_cn[[i]] <- major_cn
+                    pyclone_data$minor_cn[[i]] <- minor_cn
+                }
+            }
+
+            ## Clean the outputs
+            pyclone_data <- pyclone_data |>
+                mutate(
+                    mutation_id = paste0(
+                        chrom, ":", pos
+                        # ":"
+                        # ref, ">", alt
+                    )
+                ) |>
+                dplyr::select(
+                    mutation_id, ref_counts, var_counts, normal_cn,
+                    minor_cn, major_cn, sample_id, genotype, vcf_genotype
+                )
+
+            return(pyclone_data)
+        },
+
+        mc.cores = mc_cores
+    )
+
+    names(data_list) <- all_sample_ids
 
     data_list
 }

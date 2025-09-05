@@ -760,24 +760,64 @@ SaveData(
 ## https://github.com/vanallenlab/PyCloneTSVGeneration_FACETS_or_TITAN
 
 ## Load the snv indel data
-pcgr_snv_indel_tbl <- LoadData(
-    dir = "data/processed",
-    filename = "wes_pcgr_snv_indels_tbl"
+pcgr_snv_indel_raw <- LoadData(
+    dir = "data/processed", 
+    filename = "wes_pcgr_snv_indels_raw"
 )
 
+## Total variants = 24177, all samples have variants
+pcgr_snv_indel_tbl <- FilterPCGRSNVIndels(
+    pcgr_snv_indel_raw,
+    min_dp_tumor = 20,
+    min_vaf_tumor = 0.03,
+    min_dp_control = 10,
+    max_vaf_control = 0.01,
+    max_population_frequency = 0.001
+)
+
+# pcgr_snv_indel_tbl <- LoadData(
+#     dir = "data/processed",
+#     filename = "wes_pcgr_snv_indels_tbl"
+# )
+
 clinical_info <- LoadClinicalInfo() |> 
-    filter(FST.Group %in% c("Pre-FST", "Post-FST"))
+    filter(FST.Group %in% c("Pre-FST", "Post-FST")) |> 
+    filter(Number.of.samples.per.patient >=2)
 
-snv_indel_data <- pcgr_snv_indel_tbl |> 
+snv_indel_data <- pcgr_snv_indel_raw |> 
     filter(sample_id %in% clinical_info$Sample.ID)
-
-snv_indel_data |> filter(sample_id == "DFSP-334-T-P1")
 
 pyclone_data <- GetPycloneInputData(
     snv_indel_data = snv_indel_data,
     vcf_dir = "data/wes/Mutect2",
     cnv_facet_dir = "data/wes/CNV/cnv_facets"
 )
+
+pyclone_dir <- "data/wes/PyClone"
+
+## Save the Pyclone input data
+for (i in names(pyclone_data)) {
+
+    case_id <- str_extract(i, "DFSP-[0-9]+")
+
+    # dir_delete(here("data/wes/PyClone", case_id))
+    dir_create(here(pyclone_dir, case_id))
+
+    message(
+        paste0("Saving: ", i)
+    )
+
+    ## write the tsv
+    write_tsv(
+        pyclone_data[[i]],
+        file = here(pyclone_dir, case_id, paste0(i, ".tsv")),
+        na = "NA",
+        quote = "none"
+    )
+    
+}
+
+
 
 # ## Convert the PCGR data to a MAF format
 # maf_tbl <- ConvertPCGRToMaftools(pcgr_tbl = snv_indel_filtered)
