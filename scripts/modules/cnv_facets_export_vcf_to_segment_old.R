@@ -7,6 +7,7 @@
 
 # Load required libraries
 library(optparse)
+library(tidyverse)
 
 # Parse command line arguments
 option_list <- list(

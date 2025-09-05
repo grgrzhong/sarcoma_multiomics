@@ -221,7 +221,7 @@ for (type in names(mat_list)) {
         }
 
         ## Mutated gene level analysis
-        stat_res_list[["diff"]][[type]][[gc]] <- GetGroupStatRes(
+        stat_res_list[["diff"]][[type]][[gc]] <- GetGroupStatDiff(
             mat = mat_list[[type]],
             group1_samples = group1_samples,
             group2_samples = group2_samples,

@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 ##############################################################################
-## Description: R libraries for data analysis and visualization
+## Description: R libraries for DFSP data analysis and visualization
 ## Author:  Zhong Guorui
 ## Created: 2025-02-17
 ##############################################################################
@@ -15,6 +15,7 @@ suppressPackageStartupMessages(
         library(writexl)
         library(kableExtra)
         library(gridExtra)
+        library(VariantAnnotation)
         library(ggpubr)
         library(rstatix)
         library(ggrepel)
@@ -24,9 +25,13 @@ suppressPackageStartupMessages(
         library(cowplot)
         library(maftools)
         library(circlize)
+        library(clusterProfiler)
+        library(org.Hs.eg.db)
+        library(enrichplot)
         library(ComplexHeatmap)
         library(reshape2)
         library(sigminer)
+        library(parallel)
         library(tidyverse)
     })
 )
@@ -2015,8 +2020,8 @@ LoadClinicalInfo <- function(is_somatic_matched = TRUE) {
         show_col_types = FALSE,
         name_repair = "unique_quiet"
     ) |> 
-        select(Sample.ID, Meth.Subtype.Main.2Class) |> 
-        filter(!is.na(Meth.Subtype.Main.2Class))
+        dplyr::select(Sample.ID, Meth.Subtype.Main.2Class) |> 
+        dplyr::filter(!is.na(Meth.Subtype.Main.2Class))
 
     clinical_info <- clinical_info |> 
         left_join(meth_data, by = "Sample.ID")
@@ -5232,6 +5237,1488 @@ GisticComplexGroupOncoplot <- function(
 
 }
 
+PairedPatientOncoplot <- function(
+    cnv_gene_mat,
+    cnv_cytoband_mat,
+    is_somatic_matched = TRUE,
+    paired_group = c("Pre-FST", "Post-FST"),
+    column_sort = c("Case.ID", "FST.Group"),
+    sample_annotation = c("FST.Group", "Metastasis", "Specimen.Nature"),
+    column_title = NULL,
+    title_size = 7,
+    text_size = 6,
+    width = 18,
+    height = 12,
+    dir = "figures/oncoplot",
+    filename = "oncoplot"
+) {
+    
+    ## Get matched clinical info
+    clinical_info <- LoadClinicalInfo(is_somatic_matched = is_somatic_matched) |> 
+        mutate(
+            FST.Type = case_when(
+                FST.Group  %in% c("U-DFSP", "Pre-FST") ~ "Classic",
+                FST.Group  %in% c("Post-FST", "FS-DFSP") ~ "FST",
+                TRUE ~ "Other"
+            )
+        )
+
+    # all_sample_ids <- clinical_info |> pull(Sample.ID)
+    ## Sort the mat by patients
+    sample_ids <- clinical_info |> 
+        dplyr::filter(FST.Group %in% paired_group) |>
+        dplyr::filter(Number.of.samples.per.patient >= 2) |> 
+        # group_by(Case.ID) |>
+        # arrange(Case.ID) |>
+        pull(Sample.ID)
+
+    cnv_gene_mat <- cnv_gene_mat[, sample_ids, drop = FALSE]
+    cnv_cytoband_mat <- cnv_cytoband_mat[, sample_ids, drop = FALSE]
+
+    ## "====================================================================="
+    ## Sample annotation colors --------
+    ## "====================================================================="
+    sample_annotation_colors <- list()
+
+    for (annotation in sample_annotation) {
+        sample_annotation_colors[[annotation]] <- study_colors[[annotation]]
+    }
+
+    ## "====================================================================="
+    ## Heatmap matrix annotation colors ----
+    ## "====================================================================="
+    alteration_colors <- study_colors$Alteration
+
+    alter_fun <- list(
+        background = alter_graphic("rect", fill = "#CCCCCC"),
+        AMP = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["AMP"]]
+        ),
+        GAIN = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["GAIN"]]
+        ),
+        HOMDEL = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["HOMDEL"]]
+        ),
+        DEL = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["DEL"]]
+        ),
+        SNV = alter_graphic(
+            "rect", width = 0.9, height = 0.3,
+            fill = study_colors$Alteration[["SNV"]]
+        ),
+        substitution = alter_graphic(
+            "rect", width = 0.9, height = 0.3,
+            fill = study_colors$Alteration[["substitution"]]
+        ),
+        insertion = alter_graphic(
+            "rect", width = 0.9, height = 0.5,
+            fill = study_colors$Alteration[["insertion"]]
+        ),
+        deletion = alter_graphic(
+            "rect", width = 0.9, height = 0.5,
+            fill = study_colors$Alteration[["deletion"]]
+        )
+    )
+    ## "===================================================================="
+    ## Heatmap matrix annotation legend ----
+    ## "===================================================================="
+    alteration_legend <- Legend(
+            labels = names(study_colors$Alteration),
+            
+            ## Custom graphics function to create rectangles with backgrounds and borders that match the heatmap
+            graphics = list(
+                # AMP - full size with background and border
+                function(x, y, w, h) {
+                    # Background (grey)
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(
+                            fill = "#CCCCCC", col = "white", lwd = 0.5
+                        )
+                    )
+                    # Foreground rectangle
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.9, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["AMP"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # GAIN - full size with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(
+                            fill = "#CCCCCC", col = "white", lwd = 0.5
+                        )
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.9, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["GAIN"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # HOMDEL - full size with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.9, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["HOMDEL"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # DEL - full size with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.9, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["DEL"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # SNV - reduced height with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.3, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["SNV"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # Substitution - reduced height with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.3, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["substitution"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # Insertion - medium height with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.5, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["insertion"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # Deletion - medium height with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.5, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["deletion"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                }
+            ),
+            
+            title = "Alteration",
+            title_gp = gpar(fontsize = title_size),# fontface = "bold"
+            labels_gp = gpar(fontsize = text_size),
+            grid_height = unit(4, "mm"),
+            grid_width = unit(4, "mm"),
+            direction = "vertical"
+        )
+
+    ## "===================================================================="
+    ## Bottom sample metadata annotation -----
+    ## "===================================================================="
+    ## Sort the columns by type frequency
+    # if (main_type == "snv_indel") {
+        
+    #     main_ht_idx = 1
+
+    # } else if (main_type == "cnv_gene") {
+        
+    #     main_ht_idx = 2
+
+    # } else {
+
+    #     main_ht_idx = 3
+    # }
+
+    ## "===================================================================="
+    ## CNV gene oncoplot -----
+    ## "===================================================================="
+    cnv_gene_row_order <- rownames(cnv_gene_mat)
+
+    ht_cnv_gene <- oncoPrint(
+        cnv_gene_mat,
+        alter_fun = alter_fun,
+        col = alteration_colors,
+        top_annotation = NULL,
+        bottom_annotation = NULL,
+        show_row_names = TRUE,
+        row_names_side = "left",
+        row_order = cnv_gene_row_order,
+        row_names_gp = gpar(fontsize = text_size),
+        show_column_names = FALSE,
+        column_names_gp = gpar(fontsize = text_size),
+        column_title_gp = gpar(fontsize = title_size),
+        show_heatmap_legend = FALSE,
+        show_pct = TRUE,
+        pct_gp = gpar(fontsize = text_size),        
+        pct_digits = 0,
+        pct_side = "right"
+    )
+
+    ## "===================================================================="
+    ## CNV cytoband oncoplot -----
+    ## "===================================================================="        
+    cytoband_sample_idx <- match(
+        sample_ids, 
+        clinical_info$Sample.ID
+    )
+
+    sample_annotation_df <- clinical_info[cytoband_sample_idx, ] |> 
+        dplyr::select(Sample.ID, all_of(sample_annotation)) |> 
+        column_to_rownames("Sample.ID")
+
+    cnv_cytoband_row_order <- rownames(cnv_cytoband_mat)
+
+    bottom_annotation <- HeatmapAnnotation(
+            df = sample_annotation_df,
+            col = sample_annotation_colors,
+            annotation_height = unit(c(4, 4), "mm"),
+            annotation_name_gp = gpar(fontsize = text_size),
+            annotation_legend_param = list(
+                labels_gp = gpar(fontsize = text_size),       # Legend text
+                title_gp = gpar(fontsize = title_size)         # Legend title
+            ),
+            show_annotation_name = TRUE
+    )
+
+    ht_cnv_cytoband <- oncoPrint(
+        cnv_cytoband_mat,
+        alter_fun = alter_fun,
+        col = alteration_colors,
+        bottom_annotation = bottom_annotation,
+        top_annotation = NULL,
+        show_row_names = TRUE,
+        row_names_side = "left",
+        row_order = cnv_cytoband_row_order,
+        row_names_gp = gpar(fontsize = text_size),
+        show_column_names = TRUE,
+        column_names_gp = gpar(fontsize = text_size),
+        column_title_gp = gpar(fontsize = title_size),
+        column_order = sample_ids,
+        show_heatmap_legend = FALSE,
+        show_pct = TRUE,
+        pct_gp = gpar(fontsize = text_size),        
+        pct_digits = 0,
+        pct_side = "right"
+    )
+
+    ## "===================================================================="
+    ## Combine and save the oncoplots -----
+    ## "===================================================================="
+    ht_list <- ht_cnv_gene %v% ht_cnv_cytoband
+    
+    ## Save the oncoplot
+    dir_create(here(dir))
+    img_type <- c(".pdf", ".png")
+    
+    for (img in img_type) {
+        
+        file <- here(dir, paste0(filename, img))
+        
+        if (img == ".pdf") {
+
+            # CairoPDF(file, width = width, height = height)
+            pdf(file, width = width, height = height)
+    
+        } else if (img == ".png") {
+    
+            # CairoPNG(
+            #     file, width = width, height = height, res = 300, units = "in",
+            #     fonts = "Arial"
+            # )
+            png(
+                file, width = width, height = height, res = 600, units = "in",
+                fonts = "Arial"
+            )
+        }
+
+        draw(
+            ht_list, 
+            main_heatmap = 2,
+            ht_gap = unit(0.4, "cm"),
+
+            ## Heatmap legend
+            # show_heatmap_legend = TRUE,
+            # heatmap_legend_side = "bottom",
+
+            ## Annotation legend
+            # annotation_legend_side = "bottom",
+        
+            merge_legends = TRUE,
+            legend_gap = unit(1, "cm"),
+            padding = unit(c(1, 1, 1, 1), "cm"),
+
+            ## Add manual heatmap legend
+            heatmap_legend_list = list(alteration_legend)
+        )
+        
+        dev.off()
+
+        message(
+            paste0("Saved oncoplot: ", file)
+        )
+    }
+
+}
+
+PairedPatientGroupOncoplot <- function(
+    mat_list,
+    is_somatic_matched = TRUE,
+    paired_group = c("Pre-FST", "Post-FST"),
+    column_sort = c("Case.ID", "FST.Group"),
+    sample_annotation = c("FST.Group", "Metastasis", "Specimen.Nature"),
+    column_title = NULL,
+    title_size = 7,
+    text_size = 6,
+    width = 18,
+    height = 12,
+    dir = "figures/oncoplot",
+    filename = "oncoplot"
+) {
+    
+    ## Get matched clinical info
+    clinical_info <- LoadClinicalInfo(is_somatic_matched = is_somatic_matched) |> 
+        mutate(
+            FST.Type = case_when(
+                FST.Group  %in% c("U-DFSP", "Pre-FST") ~ "Classic",
+                FST.Group  %in% c("Post-FST", "FS-DFSP") ~ "FST",
+                TRUE ~ "Other"
+            )
+        )
+
+    # all_sample_ids <- clinical_info |> pull(Sample.ID)
+    ## Sort the mat by patients
+    sample_ids <- clinical_info |> 
+        dplyr::filter(FST.Group %in% paired_group) |>
+        dplyr::filter(Number.of.samples.per.patient >= 2) |> 
+        # group_by(Case.ID) |>
+        # arrange(Case.ID) |>
+        pull(Sample.ID)
+
+    for (i in names(mat_list)) {
+        
+        mat_list[[i]] <- mat_list[[i]][, sample_ids, drop = FALSE]
+    }
+    ## "===================================================================="
+    ## Bottom sample metadata annotation -----
+    ## "===================================================================="
+    sample_idx <- match(
+        sample_ids, 
+        clinical_info$Sample.ID
+    )
+
+    sample_annotation_df <- clinical_info[sample_idx, ] |> 
+        dplyr::select(Sample.ID, all_of(sample_annotation)) |> 
+        column_to_rownames("Sample.ID")
+    
+    ## "====================================================================="
+    ## Sample annotation colors --------
+    ## "====================================================================="
+    sample_annotation_colors <- list()
+
+    for (annotation in sample_annotation) {
+        sample_annotation_colors[[annotation]] <- study_colors[[annotation]]
+    }
+
+    ## "====================================================================="
+    ## Heatmap matrix annotation colors ----
+    ## "====================================================================="
+    alteration_colors <- study_colors$Alteration
+
+    alter_fun <- list(
+        background = alter_graphic("rect", fill = "#CCCCCC"),
+        AMP = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["AMP"]]
+        ),
+        GAIN = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["GAIN"]]
+        ),
+        HOMDEL = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["HOMDEL"]]
+        ),
+        DEL = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["DEL"]]
+        ),
+        SNV = alter_graphic(
+            "rect", width = 0.9, height = 0.3,
+            fill = study_colors$Alteration[["SNV"]]
+        ),
+        substitution = alter_graphic(
+            "rect", width = 0.9, height = 0.3,
+            fill = study_colors$Alteration[["substitution"]]
+        ),
+        insertion = alter_graphic(
+            "rect", width = 0.9, height = 0.5,
+            fill = study_colors$Alteration[["insertion"]]
+        ),
+        deletion = alter_graphic(
+            "rect", width = 0.9, height = 0.5,
+            fill = study_colors$Alteration[["deletion"]]
+        )
+    )
+    ## "===================================================================="
+    ## Heatmap matrix annotation legend ----
+    ## "===================================================================="
+    alteration_legend <- Legend(
+            labels = names(study_colors$Alteration),
+            
+            ## Custom graphics function to create rectangles with backgrounds and borders that match the heatmap
+            graphics = list(
+                # AMP - full size with background and border
+                function(x, y, w, h) {
+                    # Background (grey)
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(
+                            fill = "#CCCCCC", col = "white", lwd = 0.5
+                        )
+                    )
+                    # Foreground rectangle
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.9, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["AMP"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # GAIN - full size with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(
+                            fill = "#CCCCCC", col = "white", lwd = 0.5
+                        )
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.9, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["GAIN"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # HOMDEL - full size with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.9, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["HOMDEL"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # DEL - full size with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.9, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["DEL"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # SNV - reduced height with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.3, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["SNV"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # Substitution - reduced height with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.3, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["substitution"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # Insertion - medium height with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.5, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["insertion"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # Deletion - medium height with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.5, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["deletion"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                }
+            ),
+            
+            title = "Alteration",
+            title_gp = gpar(fontsize = title_size),# fontface = "bold"
+            labels_gp = gpar(fontsize = text_size),
+            grid_height = unit(4, "mm"),
+            grid_width = unit(4, "mm"),
+            direction = "vertical"
+        )
+
+    ## "===================================================================="
+    ## Generate the heatmap list ---------
+    ## "===================================================================="
+    ht_list <- list()
+    n_mat <- length(mat_list)
+
+    for (i in seq_along(mat_list)) {
+        
+        if (i == n_mat) {
+            
+            show_column_names <- TRUE
+
+            bottom_annotation <- HeatmapAnnotation(
+                    df = sample_annotation_df,
+                    col = sample_annotation_colors,
+                    annotation_height = unit(c(4, 4), "mm"),
+                    annotation_name_gp = gpar(fontsize = text_size),
+                    annotation_legend_param = list(
+                        labels_gp = gpar(fontsize = text_size),       # Legend text
+                        title_gp = gpar(fontsize = title_size)         # Legend title
+                    ),
+                    show_annotation_name = TRUE
+            )
+
+        } else {
+
+            show_column_names <- FALSE
+            bottom_annotation <- NULL
+        }
+
+        row_order <- rownames(mat_list[[i]])
+
+        ht_list[[i]] <- oncoPrint(
+            mat_list[[i]],
+            alter_fun = alter_fun,
+            col = alteration_colors,
+            # top_annotation = NULL,
+            bottom_annotation = bottom_annotation,
+            
+            show_row_names = TRUE,
+            row_names_side = "right",
+            row_order = row_order,
+            row_names_gp = gpar(fontsize = text_size),
+            
+            show_column_names = show_column_names,
+            column_names_gp = gpar(fontsize = text_size),
+            column_title_gp = gpar(fontsize = title_size),
+            column_order = sample_ids,
+            show_heatmap_legend = FALSE,
+            
+            show_pct = TRUE,
+            pct_gp = gpar(fontsize = text_size),        
+            pct_digits = 0,
+            pct_side = "left"
+        )
+        
+    }
+
+
+    ## "===================================================================="
+    ## Combine and save the oncoplots -----
+    ## "===================================================================="
+    ht_combined <- Reduce(`%v%`, ht_list)
+    
+    ## Save the oncoplot
+    dir_create(here(dir))
+    img_type <- c(".pdf", ".png")
+    
+    for (img in img_type) {
+        
+        file <- here(dir, paste0(filename, img))
+        
+        if (img == ".pdf") {
+
+            # CairoPDF(file, width = width, height = height)
+            pdf(file, width = width, height = height)
+    
+        } else if (img == ".png") {
+    
+            # CairoPNG(
+            #     file, width = width, height = height, res = 300, units = "in",
+            #     fonts = "Arial"
+            # )
+            png(
+                file, width = width, height = height, res = 600, units = "in",
+                fonts = "Arial"
+            )
+        }
+
+        draw(
+            ht_combined, 
+            main_heatmap = n_mat,
+            ht_gap = unit(0.4, "cm"),
+
+            column_title = column_title, 
+            column_title_gp = gpar(fontsize = title_size),
+            ## Heatmap legend
+            # show_heatmap_legend = TRUE,
+            # heatmap_legend_side = "bottom",
+
+            ## Annotation legend
+            # annotation_legend_side = "bottom",
+        
+            merge_legends = TRUE,
+            legend_gap = unit(1, "cm"),
+            padding = unit(c(1, 1, 1, 1), "cm"),
+
+            ## Add manual heatmap legend
+            heatmap_legend_list = list(alteration_legend)
+        )
+        
+        dev.off()
+
+        message(
+            paste0("Saved oncoplot: ", file)
+        )
+    }
+
+}
+
+ComplexGroupOncoplot <- function(
+    mat,
+    is_somatic_matched = TRUE,
+    split_by_group = "FST.Group",
+    sort_group_level = c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP"),
+    main_group = "FS-DFSP",
+    row_order = NULL,
+    sample_annotation = c("FST.Group", "Metastasis"),
+    column_title = NULL,
+    title_size = 8,
+    text_size = 6,
+    width = 18,
+    height = 12,
+    dir = "figures/oncoplot",
+    filename = "oncoplot"
+) {
+    
+    ## Get matched clinical info
+    clinical_info <- LoadClinicalInfo(is_somatic_matched = is_somatic_matched) |> 
+        mutate(
+            FST.Type = case_when(
+                FST.Group  %in% c("U-DFSP", "Pre-FST") ~ "Classic",
+                FST.Group  %in% c("Post-FST", "FS-DFSP") ~ "FST",
+                TRUE ~ "Other"
+            )
+        )
+
+    ## Prepare the plot data for each heatmap
+    plot_data <- list()
+
+    for (i in sort_group_level) {
+
+        sample_ids <- clinical_info |> 
+            filter(!!sym(split_by_group) == i) |> 
+            pull(Sample.ID)
+
+        ## Matrix
+        cur_mat <- mat[, sample_ids, drop = FALSE]
+        plot_data[[i]][["mat"]] <- cur_mat
+
+        ## Sample annotation colors
+        sample_idx <- match(
+            colnames(cur_mat), 
+            clinical_info$Sample.ID
+        )
+
+        cur_sample_annotation <- clinical_info[sample_idx, ] |> 
+            dplyr::select(Sample.ID, all_of(sample_annotation)) |> 
+            column_to_rownames("Sample.ID")
+        
+        plot_data[[i]][["sample_annotation"]] <- cur_sample_annotation
+        
+        ## Calcualte the freq data
+        # cn_mat[]
+    }
+    
+    ## "---------------------------------------------------------------------"
+    ## Sample annotation colors
+    ## "---------------------------------------------------------------------"
+    sample_annotation_colors <- list()
+
+    for (annotation in sample_annotation) {
+        sample_annotation_colors[[annotation]] <- study_colors[[annotation]]
+    }
+
+    ## "---------------------------------------------------------------------"
+    ## Create the matrix annotation colors
+    ## "---------------------------------------------------------------------"
+    alteration_colors <- study_colors$Alteration
+
+    alter_fun <- list(
+        background = alter_graphic("rect", fill = "#CCCCCC"),
+        AMP = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["AMP"]]
+        ),
+        GAIN = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["GAIN"]]
+        ),
+        HOMDEL = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["HOMDEL"]]
+        ),
+        DEL = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["DEL"]]
+        ),
+        SNV = alter_graphic(
+            "rect", width = 0.9, height = 0.3,
+            fill = study_colors$Alteration[["SNV"]]
+        ),
+        substitution = alter_graphic(
+            "rect", width = 0.9, height = 0.3,
+            fill = study_colors$Alteration[["substitution"]]
+        ),
+        insertion = alter_graphic(
+            "rect", width = 0.9, height = 0.5,
+            fill = study_colors$Alteration[["insertion"]]
+        ),
+        deletion = alter_graphic(
+            "rect", width = 0.9, height = 0.5,
+            fill = study_colors$Alteration[["deletion"]]
+        )
+    )
+    ## "===================================================================="
+    ## Heatmap matrix annotation legend ----
+    ## "===================================================================="
+    alteration_legend <- Legend(
+            labels = names(study_colors$Alteration),
+            
+            ## Custom graphics function to create rectangles with backgrounds and borders that match the heatmap
+            graphics = list(
+                # AMP - full size with background and border
+                function(x, y, w, h) {
+                    # Background (grey)
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(
+                            fill = "#CCCCCC", col = "white", lwd = 0.5
+                        )
+                    )
+                    # Foreground rectangle
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.9, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["AMP"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # GAIN - full size with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(
+                            fill = "#CCCCCC", col = "white", lwd = 0.5
+                        )
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.9, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["GAIN"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # HOMDEL - full size with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.9, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["HOMDEL"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # DEL - full size with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.9, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["DEL"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # SNV - reduced height with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.3, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["SNV"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # Substitution - reduced height with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.3, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["substitution"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # Insertion - medium height with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.5, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["insertion"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # Deletion - medium height with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.5, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["deletion"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                }
+            ),
+            
+            title = "Alteration",
+            title_gp = gpar(fontsize = title_size),# fontface = "bold"
+            labels_gp = gpar(fontsize = text_size),
+            grid_height = unit(4, "mm"),
+            grid_width = unit(4, "mm"),
+            direction = "vertical"
+        )
+    
+    ## "---------------------------------------------------------------------"
+    ## Generate the heatmap list
+    ## "---------------------------------------------------------------------"
+    ht_list <- list()
+    n_group <- length(sort_group_level)
+    main_ht_idx <- which(sort_group_level == main_group)
+
+    for (i in seq_along(sort_group_level)) {
+
+        if (i == n_group) {
+            
+            show_annotation_name <- TRUE
+            show_row_names <- TRUE
+            show_heatmap_legend <- TRUE
+
+        } else {
+
+            show_annotation_name <- FALSE
+            show_row_names <- FALSE
+            show_heatmap_legend <- FALSE
+        }
+        
+        bottom_annotation <- HeatmapAnnotation(
+                df = plot_data[[i]][["sample_annotation"]],
+                col = sample_annotation_colors,
+                annotation_height = unit(c(4, 4), "mm"),
+                annotation_name_gp = gpar(fontsize = text_size),
+                annotation_legend_param = list(
+                    labels_gp = gpar(fontsize = text_size),       # Legend text
+                    title_gp = gpar(fontsize = title_size)         # Legend title
+                ),
+                show_annotation_name = show_annotation_name
+        )
+
+        ht_list[[i]] <- oncoPrint(
+            plot_data[[i]][["mat"]],
+            alter_fun = alter_fun,
+            col = alteration_colors,
+            bottom_annotation = bottom_annotation,
+            show_row_names = show_row_names,
+            row_names_side = "right",
+            row_names_gp = gpar(fontsize = text_size),
+            row_order = row_order,
+            show_column_names = TRUE,
+            column_names_gp = gpar(fontsize = text_size),
+            column_title_gp = gpar(fontsize = title_size),
+            show_heatmap_legend = FALSE,
+            heatmap_legend_param = list(
+                # labels_gp = gpar(fontsize = text_size), 
+                title_gp = gpar(fontsize = title_size),
+                title = "CNV Alteration"
+            ),
+            show_pct = TRUE,
+            pct_digits = 0,
+            pct_side = "left",
+            pct_gp = gpar(fontsize = text_size)
+        )
+    }
+
+    ht_combined <- Reduce(`+`, ht_list)
+    
+    heatmap_legend <- Legend(
+            labels = names(alteration_colors),
+            legend_gp = gpar(fill = alteration_colors),
+            title = "CNV Alteration",
+            title_gp = gpar(fontsize = title_size),
+            labels_gp = gpar(fontsize = text_size),
+            grid_height = unit(4, "mm"),
+            grid_width = unit(4, "mm")
+    )
+
+    ## Save the oncoplot
+    dir_create(here(dir))
+    img_type <- c(".pdf", ".png")
+    
+    for (img in img_type) {
+        
+        file <- here(dir, paste0(filename, img))
+        
+        if (img == ".pdf") {
+
+            # CairoPDF(file, width = width, height = height)
+            pdf(file, width = width, height = height)
+    
+        } else if (img == ".png") {
+    
+            # CairoPNG(
+            #     file, width = width, height = height, res = 300, units = "in",
+            #     fonts = "Arial"
+            # )
+            png(
+                file, width = width, height = height, res = 600, units = "in",
+                fonts = "Arial"
+            )
+        }
+        
+        draw(
+            ht_combined, 
+            main_heatmap = main_ht_idx,
+            ht_gap = unit(0.2, "cm"),
+
+            column_title = column_title, 
+            column_title_gp = gpar(fontsize = title_size),
+            ## Heatmap legend
+            # show_heatmap_legend = TRUE,
+            # heatmap_legend_side = "right",
+
+            ## Annotation legend
+            # annotation_legend_side = "bottom",
+        
+            merge_legends = TRUE,
+            legend_gap = unit(1, "cm"),
+            padding = unit(c(1, 1, 1, 1), "cm"),
+
+            ## Add manual heatmap legend
+            heatmap_legend_list = list(alteration_legend)
+        )
+        
+        dev.off()
+
+        message(
+            paste0("Saved oncoplot: ", file)
+        )
+    }
+
+}
+
+VerticalCombinedOncoplot <- function(
+    snv_indel_mat,
+    cnv_gene_mat,
+    cnv_cytoband_mat,
+    is_somatic_matched = TRUE,
+    main_type = "cytoband",
+    sample_annotation = c("FST.Group", "Metastasis", "Specimen.Nature"),
+    column_title = NULL,
+    text_size = 6,
+    title_size = 7,
+    width = 18,
+    height = 12,
+    dir = "figures/oncoplot",
+    filename = "oncoplot"
+) {
+    
+    ## Get matched clinical info
+    clinical_info <- LoadClinicalInfo(is_somatic_matched = is_somatic_matched)
+
+    all_sample_ids <- clinical_info |> pull(Sample.ID)
+
+    ## Make sure all columns are same
+    snv_indel_mat <- snv_indel_mat[, all_sample_ids, drop = FALSE]
+    cnv_gene_mat <- cnv_gene_mat[, all_sample_ids, drop = FALSE]
+    cnv_cytoband_mat <- cnv_cytoband_mat[, all_sample_ids, drop = FALSE]
+
+    ## if the column names of three matrix are not equal, then stop
+    if (!all(colnames(snv_indel_mat) %in% colnames(cnv_gene_mat)) || !all(colnames(snv_indel_mat)  %in% colnames(cnv_cytoband_mat))) {
+        stop("The column names of the three matrices are not equal.")
+    }
+
+    ## "===================================================================="
+    ## Column sample annotation colors -----
+    ## "===================================================================="
+    sample_annotation_colors <- list()
+
+    for (annotation in sample_annotation) {
+        sample_annotation_colors[[annotation]] <- study_colors[[annotation]]
+    }
+
+    ## "===================================================================="
+    ## Heatmap matrix annotation colors ----
+    ## "===================================================================="
+    alteration_colors <- study_colors$Alteration
+
+    alter_fun <- list(
+        background = alter_graphic("rect", fill = "#CCCCCC"),
+        AMP = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["AMP"]]
+        ),
+        GAIN = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["GAIN"]]
+        ),
+        HOMDEL = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["HOMDEL"]]
+        ),
+        DEL = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["DEL"]]
+        ),
+        SNV = alter_graphic(
+            "rect", width = 0.9, height = 0.3,
+            fill = study_colors$Alteration[["SNV"]]
+        ),
+        substitution = alter_graphic(
+            "rect", width = 0.9, height = 0.3,
+            fill = study_colors$Alteration[["substitution"]]
+        ),
+        insertion = alter_graphic(
+            "rect", width = 0.9, height = 0.5,
+            fill = study_colors$Alteration[["insertion"]]
+        ),
+        deletion = alter_graphic(
+            "rect", width = 0.9, height = 0.5,
+            fill = study_colors$Alteration[["deletion"]]
+        )
+    )
+    ## "===================================================================="
+    ## Heatmap matrix annotation legend ----
+    ## "===================================================================="
+    alteration_legend <- Legend(
+        labels = names(study_colors$Alteration),
+        
+        ## Custom graphics function to create rectangles with backgrounds and borders that match the heatmap
+        graphics = list(
+            # AMP - full size with background and border
+            function(x, y, w, h) {
+                # Background (grey)
+                grid.rect(
+                    x, y, w, h, 
+                    gp = gpar(
+                        fill = "#CCCCCC", col = "white", lwd = 0.5
+                    )
+                )
+                # Foreground rectangle
+                grid.rect(
+                    x, y, w * 0.9, h * 0.9, 
+                    gp = gpar(
+                        fill = study_colors$Alteration[["AMP"]], 
+                        col = "white", lwd = 0.5
+                    )
+                )
+            },
+            # GAIN - full size with background and border
+            function(x, y, w, h) {
+                grid.rect(
+                    x, y, w, h, 
+                    gp = gpar(
+                        fill = "#CCCCCC", col = "white", lwd = 0.5
+                    )
+                )
+                grid.rect(
+                    x, y, w * 0.9, h * 0.9, 
+                    gp = gpar(
+                        fill = study_colors$Alteration[["GAIN"]], 
+                        col = "white", lwd = 0.5
+                    )
+                )
+            },
+            # HOMDEL - full size with background and border
+            function(x, y, w, h) {
+                grid.rect(
+                    x, y, w, h, 
+                    gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                )
+                grid.rect(
+                    x, y, w * 0.9, h * 0.9, 
+                    gp = gpar(
+                        fill = study_colors$Alteration[["HOMDEL"]], 
+                        col = "white", lwd = 0.5
+                    )
+                )
+            },
+            # DEL - full size with background and border
+            function(x, y, w, h) {
+                grid.rect(
+                    x, y, w, h, 
+                    gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                )
+                grid.rect(
+                    x, y, w * 0.9, h * 0.9, 
+                    gp = gpar(
+                        fill = study_colors$Alteration[["DEL"]], 
+                        col = "white", lwd = 0.5
+                    )
+                )
+            },
+            # SNV - reduced height with background and border
+            function(x, y, w, h) {
+                grid.rect(
+                    x, y, w, h, 
+                    gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                )
+                grid.rect(
+                    x, y, w * 0.9, h * 0.3, 
+                    gp = gpar(
+                        fill = study_colors$Alteration[["SNV"]], 
+                        col = "white", lwd = 0.5
+                    )
+                )
+            },
+            # Substitution - reduced height with background and border
+            function(x, y, w, h) {
+                grid.rect(
+                    x, y, w, h, 
+                    gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                )
+                grid.rect(
+                    x, y, w * 0.9, h * 0.3, 
+                    gp = gpar(
+                        fill = study_colors$Alteration[["substitution"]], 
+                        col = "white", lwd = 0.5
+                    )
+                )
+            },
+            # Insertion - medium height with background and border
+            function(x, y, w, h) {
+                grid.rect(
+                    x, y, w, h, 
+                    gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                )
+                grid.rect(
+                    x, y, w * 0.9, h * 0.5, 
+                    gp = gpar(
+                        fill = study_colors$Alteration[["insertion"]], 
+                        col = "white", lwd = 0.5
+                    )
+                )
+            },
+            # Deletion - medium height with background and border
+            function(x, y, w, h) {
+                grid.rect(
+                    x, y, w, h, 
+                    gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                )
+                grid.rect(
+                    x, y, w * 0.9, h * 0.5, 
+                    gp = gpar(
+                        fill = study_colors$Alteration[["deletion"]], 
+                        col = "white", lwd = 0.5
+                    )
+                )
+            }
+        ),
+        
+        title = "Alteration",
+        title_gp = gpar(fontsize = title_size),# fontface = "bold"
+        labels_gp = gpar(fontsize = text_size),
+        grid_height = unit(4, "mm"),
+        grid_width = unit(4, "mm"),
+        direction = "vertical"
+    )
+
+    ## "===================================================================="
+    ## Bottom sample metadata annotation -----
+    ## "===================================================================="
+    ## Sort the columns by type frequency
+    if (main_type == "snv_indel") {
+        
+        main_ht_idx = 1
+
+    } else if (main_type == "cnv_gene") {
+        
+        main_ht_idx = 2
+
+    } else {
+
+        main_ht_idx = 3
+    }
+
+    ## "===================================================================="
+    ## SNV/indel oncoplot -----
+    ## "===================================================================="
+    ## snv indel oncoplot
+    snv_indel_row_freq <- rowSums(snv_indel_mat !="")
+    snv_indel_row_order <- order(snv_indel_row_freq, decreasing = TRUE)
+
+    ht_snv_indel <- oncoPrint(
+        snv_indel_mat,
+        alter_fun = alter_fun,
+        col = alteration_colors,
+        column_title = column_title,
+        bottom_annotation = NULL,
+        show_row_names = TRUE,
+        row_order  = snv_indel_row_order,
+        row_names_gp = gpar(fontsize = text_size),
+        show_column_names = FALSE,
+        column_names_gp = gpar(fontsize = text_size),
+        column_title_gp = gpar(fontsize = title_size),
+        show_heatmap_legend = FALSE,
+        show_pct = TRUE,
+        pct_gp = gpar(fontsize = text_size),
+        pct_digits = 0,
+        pct_side = "left",
+    )
+
+    ## "===================================================================="
+    ## CNV gene oncoplot -----
+    ## "===================================================================="
+    cnv_gene_row_freq <- rowSums(cnv_gene_mat !="")
+    cnv_gene_row_order <- order(cnv_gene_row_freq, decreasing = TRUE)
+
+    ht_cnv_gene <- oncoPrint(
+        cnv_gene_mat,
+        alter_fun = alter_fun,
+        col = alteration_colors,
+        top_annotation = NULL,
+        bottom_annotation = NULL,
+        show_row_names = TRUE,
+        row_order = cnv_gene_row_order,
+        row_names_gp = gpar(fontsize = text_size),
+        show_column_names = FALSE,
+        column_names_gp = gpar(fontsize = text_size),
+        column_title_gp = gpar(fontsize = title_size),
+        show_heatmap_legend = FALSE,
+        show_pct = TRUE,
+        pct_gp = gpar(fontsize = text_size),        
+        pct_digits = 0,
+        pct_side = "left"
+    )
+
+    ## "===================================================================="
+    ## CNV cytoband oncoplot -----
+    ## "===================================================================="
+    cytoband_sample_idx <- match(
+        colnames(cnv_cytoband_mat), clinical_info$Sample.ID
+    )
+
+    sample_annotation_df <- clinical_info[cytoband_sample_idx, ] |> 
+            dplyr::select(Sample.ID, all_of(sample_annotation)) |> 
+            column_to_rownames("Sample.ID")
+        
+    bottom_annotation <- HeatmapAnnotation(
+            df = sample_annotation_df,
+            col = sample_annotation_colors,
+            annotation_height = unit(c(4, 4), "mm"),
+            annotation_name_gp = gpar(fontsize = text_size),
+            annotation_legend_param = list(
+                labels_gp = gpar(fontsize = text_size),       # Legend text
+                title_gp = gpar(fontsize = title_size)         # Legend title
+            ),
+            show_annotation_name = TRUE
+    )
+
+    cnv_cytoband_row_freq <- rowSums(cnv_cytoband_mat !="")
+    cnv_cytoband_row_order <- order(cnv_cytoband_row_freq, decreasing = TRUE)
+
+    ht_cnv_cytoband <- oncoPrint(
+        cnv_cytoband_mat,
+        alter_fun = alter_fun,
+        col = alteration_colors,
+        bottom_annotation = bottom_annotation,
+        top_annotation = NULL,
+        show_row_names = TRUE,
+        row_order = cnv_cytoband_row_order,
+        row_names_gp = gpar(fontsize = text_size),
+        show_column_names = TRUE,
+        column_names_gp = gpar(fontsize = text_size),
+        column_title_gp = gpar(fontsize = title_size),
+        show_heatmap_legend = FALSE,
+        show_pct = TRUE,
+        pct_gp = gpar(fontsize = text_size),        
+        pct_digits = 0,
+        pct_side = "left"
+    )
+
+    ## "===================================================================="
+    ## Combine and save the oncoplots -----
+    ## "===================================================================="
+    ht_list <- ht_snv_indel %v% ht_cnv_gene %v% ht_cnv_cytoband
+
+    ## Save the oncoplot
+    dir_create(here(dir))
+    img_type <- c(".pdf", ".png")
+    
+    for (img in img_type) {
+        
+        file <- here(dir, paste0(filename, img))
+        
+        if (img == ".pdf") {
+
+            # CairoPDF(file, width = width, height = height)
+            pdf(file, width = width, height = height)
+    
+        } else if (img == ".png") {
+    
+            # CairoPNG(
+            #     file, width = width, height = height, res = 300, units = "in",
+            #     fonts = "Arial"
+            # )
+            png(
+                file, width = width, height = height, res = 600, units = "in",
+                fonts = "Arial"
+            )
+        }
+
+        draw(
+            ht_list, 
+            main_heatmap = main_ht_idx,
+            # ht_gap = unit(0.2, "cm"),
+
+            ## Heatmap legend
+            # show_heatmap_legend = TRUE,
+            # heatmap_legend_side = "bottom",
+
+            ## Annotation legend
+            # annotation_legend_side = "bottom",
+        
+            merge_legends = TRUE,
+            legend_gap = unit(1, "cm"),
+            padding = unit(c(1, 1, 1, 1), "cm"),
+
+            ## Add manual heatmap legend
+            heatmap_legend_list = list(alteration_legend)
+        )
+        
+        dev.off()
+
+        message(
+            paste0("Saved oncoplot: ", file)
+        )
+    }
+
+}
+
 GisticChromPlot <- function(
     data,
     peaks_data = NULL,
@@ -5979,11 +7466,15 @@ GetGisticCNData <- function(
     ## Get alternation matrix data
     cn_mat <- gistic@cnMatrix
     # num_mat = gistic@numericMatrix
-    # dim(cn_mat)
+    dim(cn_mat)
     # cn_mat[1:5, 1:5]
+
+    cytoband_summary <- gistic@cytoband.summary
 
     cn_cytoband_tbl <- cn_mat |> 
         as_tibble(rownames = "Unique_Name")
+
+    # cn_cytoband_tbl
 
     cytoband_samples <- colnames(cn_cytoband_tbl)[-1]
 
@@ -6020,9 +7511,14 @@ GetGisticCNData <- function(
             add_column(!!sym(missed_sample) := "")
     }
 
+    cn_gene_mat <-  cn_gene_tbl |> 
+        column_to_rownames(var = "symbol") |> 
+        as.matrix()
+
     list(
-        cn_cytoband_tbl = cn_cytoband_tbl,
-        cn_gene_tbl = cn_gene_tbl,
+        cn_cytoband_mat = cn_mat,
+        cn_cytoband_data = cytoband_summary,
+        cn_gene_mat = cn_gene_mat,
         cn_gene_data = cn_gene_data
     )
 }
@@ -6417,7 +7913,69 @@ GetPCGRSNVIncelGroupStatRes <- function(
         mutate(group_comparison = group_comparison, .after = symbol)
 }
 
-GetGroupStatRes <- function(
+GetGroupStatShare <- function(
+    mat,
+    group1_samples,
+    group2_samples,
+    variant_type = "symbol",
+    group_comparison,
+    min_freq_per_group = 0.2,
+    min_present_per_group = 3
+) {
+
+    ## Get the matched group info
+    group1_total <- length(group1_samples)
+    group2_total <- length(group2_samples)
+
+    stat_data <- as_tibble(mat, rownames = variant_type) |>
+        pivot_longer(
+            cols = -!!sym(variant_type),
+            names_to = "sample_id",
+            values_to = "variant_class"
+        )
+    
+    group1_freq <- stat_data |> 
+        filter(sample_id %in% group1_samples) |> 
+        group_by(!!sym(variant_type)) |>
+        summarise(
+            group1_altered = sum(variant_class !=""),
+            .groups = "drop"
+        ) |> 
+        mutate(
+            group1_total = group1_total,
+            group1_freq = group1_altered / group1_total
+        )
+
+    group2_freq <- stat_data |> 
+        filter(sample_id %in% group2_samples) |> 
+        group_by(!!sym(variant_type)) |>
+        summarise(
+            group2_altered = sum(variant_class !=""),
+            .groups = "drop"
+        ) |> 
+        mutate(
+            group2_total = group2_total,
+            group2_freq = group2_altered / group2_total
+        )
+
+    ## Combined the data
+    group1_freq |> 
+        mutate(
+            group_comparison = group_comparison, 
+            .after = {{variant_type}}
+        ) |>
+        left_join(group2_freq, by = variant_type) |> 
+        dplyr::filter(
+            group1_altered >= min_present_per_group & 
+            group2_altered >= min_present_per_group
+        ) |> 
+        dplyr::filter(
+            group1_freq >= min_freq_per_group & 
+            group2_freq >= min_freq_per_group
+        )
+}
+
+GetGroupStatDiff <- function(
     mat,
     group1_samples,
     group2_samples,
@@ -6529,6 +8087,167 @@ GetGroupStatRes <- function(
             .after = {{variant_type}}
         ) |> 
         arrange(fisher_p_val)
+}
+
+GetGroupStatResList <- function(mat_list) {
+    
+    stat_res_list <- mclapply(
+
+        names(mat_list),
+        function(type) {
+            message(paste0("*Processing ", type))
+
+            if (type == "mutated_gene") {
+                clinical_info <- LoadClinicalInfo(is_somatic_matched = FALSE)
+                cohort_size <- nrow(clinical_info)
+            } else {
+                clinical_info <- LoadClinicalInfo(is_somatic_matched = TRUE)
+                cohort_size <- nrow(clinical_info)
+            }
+
+            if (grepl("gene", type)) {
+                variant_type <- "symbol"
+            } else if (grepl("arm", type)) {
+                variant_type <- "arm"
+            } else {
+                variant_type <- "cytoband"
+            }
+
+            ## Initialize results for this type
+
+            type_results <- list(
+                diff = list(),
+                share = list(),
+                freq = NULL
+            )
+
+            ## Loop through different comparsions
+            for (gc in names(group_comparisons)) {
+                message(paste0(" - ", gc))
+
+                group1 <- group_comparisons[[gc]][["group1"]]
+                group2 <- group_comparisons[[gc]][["group2"]]
+
+                if (gc == "Pre-FST_vs_Post-FST") {
+                    ## Paired  samples
+                    group1_samples <- clinical_info |>
+                        filter(Number.of.samples.per.patient >= 2) |>
+                        filter(FST.Group %in% group1) |>
+                        pull(Sample.ID)
+
+                    group2_samples <- clinical_info |>
+                        filter(Number.of.samples.per.patient >= 2) |>
+                        filter(FST.Group %in% group2) |>
+                        pull(Sample.ID)
+                } else if (gc == "Primary_vs_Metastasis") {
+                    ## Get the case that have metastatsis
+                    case_ids <- clinical_info |>
+                        filter(Number.of.samples.per.patient >= 2) |>
+                        filter(grepl("Metastasis", Specimen.Nature)) |>
+                        pull(Case.ID)
+
+                    group1_samples <- clinical_info |>
+                        filter(Case.ID %in% case_ids) |>
+                        filter(Number.of.samples.per.patient >= 2) |>
+                        filter(Specimen.Nature %in% group1) |>
+                        pull(Sample.ID)
+
+                    group2_samples <- clinical_info |>
+                        filter(Case.ID %in% case_ids) |>
+                        filter(Number.of.samples.per.patient >= 2) |>
+                        filter(Specimen.Nature %in% group2) |>
+                        pull(Sample.ID)
+                } else if (gc == "Unpaired_Primary_vs_Metastasis") {
+                    group1_samples <- clinical_info |>
+                        filter(FST.Group %in% c("FS-DFSP")) |>
+                        filter(Specimen.Nature %in% group1) |>
+                        pull(Sample.ID)
+
+                    group2_samples <- clinical_info |>
+                        filter(FST.Group %in% c("FS-DFSP")) |>
+                        filter(Specimen.Nature %in% group2) |>
+                        pull(Sample.ID)
+                } else {
+                    group1_samples <- clinical_info |>
+                        filter(FST.Group %in% group1) |>
+                        pull(Sample.ID)
+
+                    group2_samples <- clinical_info |>
+                        filter(FST.Group %in% group2) |>
+                        pull(Sample.ID)
+                }
+
+                ## Differential analysis
+                type_results[["diff"]][[gc]] <- GetGroupStatDiff(
+                    mat = mat_list[[type]],
+                    group1_samples = group1_samples,
+                    group2_samples = group2_samples,
+                    variant_type = variant_type,
+                    group_comparison = gc,
+                    alternative = "two.sided",
+                    p_adjust_method = "BH"
+                )
+
+                if (type != "gistic_cnv_cytoband") {
+                    type_results[["diff"]][[gc]] <- type_results[["diff"]][[gc]] |>
+                        separate_wider_delim(
+                            col = !!sym(variant_type),
+                            delim = "_",
+                            names = c(variant_type, "alteration_type")
+                        )
+                }
+
+                ## Shared analysis
+                type_results[["share"]][[gc]] <- GetGroupStatShare(
+                    mat = mat_list[[type]],
+                    group1_samples = group1_samples,
+                    group2_samples = group2_samples,
+                    variant_type = variant_type,
+                    group_comparison = gc,
+                    min_freq_per_group = 0.2,
+                    min_present_per_group = 3
+                )
+
+                if (type != "gistic_cnv_cytoband") {
+                    type_results[["share"]][[gc]] <- type_results[["share"]][[gc]] |>
+                        separate_wider_delim(
+                            col = !!sym(variant_type),
+                            delim = "_",
+                            names = c(variant_type, "alteration_type")
+                        )
+                }
+            }
+
+            ## Frequency analysis
+            type_results[["freq"]] <- GetVariantFreq(
+                mat = mat_list[[type]],
+                variant_type = variant_type
+            )
+
+
+            if (type != "gistic_cnv_cytoband") {
+                type_results[["freq"]] <- type_results[["freq"]] |>
+                    separate_wider_delim(
+                        col = !!sym(variant_type),
+                        delim = "_",
+                        names = c(variant_type, "alteration_type")
+                    )
+            }
+
+            return(type_results)
+        },
+        mc.cores = mc_cores
+    )
+
+    names(stat_res_list) <- names(mat_list)
+
+    final_stat_res_list <- list(
+        diff = map(stat_res_list, ~ .x$diff) |> setNames(names(mat_list)),
+        share = map(stat_res_list, ~ .x$share) |> setNames(names(mat_list)),
+        freq = map(stat_res_list, ~ .x$freq) |> setNames(names(mat_list))
+    )
+
+    final_stat_res_list
 }
 
 LoadCBioPortalSarcomaData <- function(
@@ -6804,6 +8523,76 @@ GetVariantMat <- function(
     variant_mat
 }
 
+GetVariantTypeMat <- function(
+    data,
+    variant_type = "symbol",
+    variant_class = "variant_class",
+    is_somatic_matched = TRUE
+) {
+
+    ## Load clincial info
+    clinical_info <- LoadClinicalInfo(is_somatic_matched = is_somatic_matched)
+
+    all_samples <- unique(clinical_info$Sample.ID)
+
+    ## Keep releveant data
+    cur_data <- data |> filter(sample_id %in% all_samples)
+
+    cur_samples <- unique(cur_data$sample_id)
+
+    missed_sample <- setdiff(clinical_info$Sample.ID, cur_samples)
+
+    ## Save a clearned data: row=gene name, column=sample_id
+    variant_tbl <- cur_data |> 
+        mutate(
+            {{variant_type}} := paste0(
+                !!sym(variant_type), "_", !!sym(variant_class)
+            )
+        ) |>
+        group_by(sample_id, !!sym(variant_type)) |>
+        summarise(
+            variant_class = paste(
+                unique(!!sym(variant_class)), collapse = ","
+            ),
+            .groups = "drop"
+        ) |> 
+        pivot_wider(
+            names_from = sample_id,
+            values_from = variant_class,
+            values_fill = ""
+        )
+
+    if (length(missed_sample) > 0) {
+    
+        message(
+            paste0(" - No variants could be found for these samples: ")
+        )
+        message(
+            paste0(" > ", missed_sample, collapse = "\n")
+        )
+
+        ## Add the missed sample
+        for (i in missed_sample) {
+            variant_tbl <- variant_tbl |> 
+                add_column(!!i := "")
+        }
+    }
+
+    variant_mat <- variant_tbl |> 
+        column_to_rownames(var = variant_type) |>
+        as.matrix()
+    
+    ## print out the dimension
+    n_sample <- ncol(variant_mat)
+    n_variant <- nrow(variant_mat)
+
+    message(
+        paste0(" - samples: ", n_sample, ", variants: ", n_variant)
+    )
+
+    variant_mat
+}
+
 GetVariantFreq <- function(
     mat,
     variant_type = "symbol"
@@ -6822,4 +8611,285 @@ GetVariantFreq <- function(
             freq = n_altered / n_total
         ) |>
         arrange(desc(n_altered))
+}
+
+GetGroupComparisonRes <- function(mat) {
+
+    if (type == "mutated_gene") {
+
+        clinical_info <- LoadClinicalInfo(is_somatic_matched = FALSE)
+        cohort_size <- nrow(clinical_info)
+
+    } else {
+
+        clinical_info <- LoadClinicalInfo(is_somatic_matched = TRUE)
+        cohort_size <- nrow(clinical_info)
+    }
+
+    if (grepl("gene", type)) {
+        
+        variant_type <- "symbol"
+
+    } else if (grepl("arm", type)) {
+
+        variant_type <- "arm"
+
+    } else {
+        
+        variant_type <- "cytoband"
+
+    }
+
+    ## Loop through different comparsions
+    for (gc in names(group_comparisons)) {
+        
+        message(paste0(" - ", gc))
+        
+        group1 <- group_comparisons[[gc]][["group1"]]
+        group2 <- group_comparisons[[gc]][["group2"]]
+
+        if (gc == "Pre-FST_vs_Post-FST") {
+
+            ## Paired  samples
+            group1_samples <- clinical_info |>
+                filter(Number.of.samples.per.patient >= 2) |>
+                filter(FST.Group %in% group1) |>
+                pull(Sample.ID)
+
+            group2_samples <- clinical_info |>
+                filter(Number.of.samples.per.patient >= 2) |>
+                filter(FST.Group %in% group2) |>
+                pull(Sample.ID)
+
+        } else if (gc == "Primary_vs_Metastasis") {
+            ## Get the case that have metastatsis
+            case_ids <- clinical_info |>
+                filter(Number.of.samples.per.patient >= 2) |>
+                filter(grepl("Metastasis", Specimen.Nature)) |>
+                pull(Case.ID)
+
+            group1_samples <- clinical_info |>
+                filter(Case.ID %in% case_ids) |>
+                filter(Number.of.samples.per.patient >= 2) |>
+                filter(Specimen.Nature %in% group1) |>
+                pull(Sample.ID)
+
+            group2_samples <- clinical_info |>
+                filter(Case.ID %in% case_ids) |>
+                filter(Number.of.samples.per.patient >= 2) |>
+                filter(Specimen.Nature %in% group2) |>
+                pull(Sample.ID)
+
+        } else if (gc == "Unpaired_Primary_vs_Metastasis") {
+            
+            group1_samples <- clinical_info |>
+                filter(FST.Group %in% c("FS-DFSP")) |>
+                filter(Specimen.Nature %in% group1) |>
+                pull(Sample.ID)
+
+            group2_samples <- clinical_info |>
+                filter(FST.Group %in% c("FS-DFSP")) |>
+                filter(Specimen.Nature %in% group2) |>
+                pull(Sample.ID)
+
+        } else {
+            group1_samples <- clinical_info |>
+                filter(FST.Group %in% group1) |>
+                pull(Sample.ID)
+
+            group2_samples <- clinical_info |>
+                filter(FST.Group %in% group2) |>
+                pull(Sample.ID)
+        }
+
+        ## Mutated gene level analysis
+        stat_res_list[["diff"]][[type]][[gc]] <- GetGroupStatDiff(
+            mat = mat_list[[type]],
+            group1_samples = group1_samples,
+            group2_samples = group2_samples,
+            variant_type = variant_type,
+            group_comparison = gc,
+            alternative = "two.sided",
+            p_adjust_method = "BH"
+        ) |> 
+            separate_wider_delim(
+                col = !!sym(variant_type),
+                delim = "_",
+                names = c(variant_type, "alteration_type")
+            )
+    }
+
+    ## Save the shared genes/cytobands
+    stat_res_list[["share"]][[type]] <- GetVariantFreq(
+        mat = mat_list[[type]],
+        variant_type = variant_type
+    ) |> 
+    separate_wider_delim(
+        col = !!sym(variant_type),
+        delim = "_",
+        names = c(variant_type, "alteration_type")
+    )
+}
+
+GetPycloneInputData <- function(
+    snv_indel_data, ## snv/indel data
+    vcf_dir = "data/wes/Mutect2",
+    cnv_facet_dir = "data/wes/CNV/cnv_facets"
+
+) {
+    all_sample_ids <- unique(snv_indel_data$sample_id)
+
+    data_list <- list()
+
+    for (sample_id in all_sample_ids) {
+
+        message(
+            paste0(" - Processing ", sample_id)
+        )
+
+        ## Prepare the snv/indel data
+        cur_data <- snv_indel_data |>
+            filter(sample_id == !!sample_id) |>
+            dplyr::select(
+                sample_id, genomic_change, variant_class, symbol
+            ) |>
+            mutate(
+                chrom = paste0(
+                    "chr", str_extract(genomic_change, "^[0-9XY]+")
+                ),
+                pos = as.integer(
+                    str_extract(genomic_change, "(?<=:g\\.)[0-9]+")
+                )
+            ) |>
+            mutate(
+                mutation = sapply(
+                    genomic_change,
+                    function(x) str_split(x, "g.")[[1]][[2]]
+                ),
+                ## remove the coordinates
+                mutation = str_replace_all(
+                    mutation, "^[0-9]+", ""
+                )
+            ) |>
+            separate_wider_delim(
+                mutation,
+                names = c("ref", "alt"),
+                delim = ">",
+                cols_remove = TRUE
+            )
+
+        ## Load the FACETS setgment data
+        segment_file <- here(
+            cnv_facet_dir, sample_id, paste0(sample_id, ".tsv")
+        )
+
+        segment_data <- read_tsv(segment_file, show_col_types = FALSE) |>
+            clean_names() |>
+            dplyr::select(
+                chrom, pos, end, tcn_em, lcn_em, purity, svtype, emflags
+            ) |>
+            mutate(
+                major_cn = as.integer(round(tcn_em - lcn_em)),
+                minor_cn = as.integer(round(lcn_em)),
+            ) |>
+            filter(!is.na(lcn_em)) |>
+            dplyr::mutate(
+                start_fixed = if_else(pos > end, end, pos),
+                end_fixed = if_else(pos > end, pos, end)
+            ) |>
+            dplyr::select(
+                chrom,
+                start = start_fixed, end = end_fixed,
+                major_cn, minor_cn, tcn_em, lcn_em, purity, svtype, emflags
+            ) |>
+            mutate(total_cn = major_cn + minor_cn, .after = minor_cn) |>
+            distinct(chrom, start, end, .keep_all = TRUE)
+
+        ## Retrieve the mutation ref and var counts
+        vcf_file <- here(
+            vcf_dir, sample_id, paste0(sample_id, ".final.vcf.gz")
+        )
+
+        vcf_data <- readVcf(vcf_file, "hg38")
+
+        vcf_tbl <- tibble(
+            CHROM = as.character(seqnames(vcf_data)),
+            POS = as.integer(start(vcf_data)),
+            REF = as.character(ref(vcf_data)),
+            ALT = as.character(unlist(alt(vcf_data))),
+            AD = geno(vcf_data)$AD,
+            GT = geno(vcf_data)$GT
+        ) |>
+            mutate(
+                # genomic_change = paste0(
+                #     str_remove(CHROM, "^chr"), ":", "g.",
+                #     POS, REF, ">", ALT
+                # ),
+                ref_counts = sapply(AD[, sample_id], function(x) x[1]), # Tumor ref_counts
+                var_counts = sapply(AD[, sample_id], function(x) x[2]), # Tumor alt_counts
+                genotype = GT[, sample_id]
+            ) |>
+            clean_names() |>
+            dplyr::select(
+                # genomic_change,
+                chrom, pos, ref, alt, ref_counts, var_counts, genotype
+            )
+
+        pyclone_data <- cur_data |>
+            # dplyr::select(sample_id, genomic_change) |>
+            ## retrive the ref and alt counts
+            left_join(
+                vcf_tbl,
+                by = c("chrom", "pos", "ref", "alt")
+            ) |>
+            mutate(
+                major_cn = 1, # Default
+                minor_cn = 1, # Default
+                normal_cn = 2, # Default for autosomes
+            )
+
+        ## Map mutations to FACETS segments
+        for (i in seq_len(nrow(pyclone_data))) {
+            mutation_id <- pyclone_data$genomic_change[i]
+
+            chromosome <- pyclone_data$chrom[i]
+            pos <- pyclone_data$pos[i]
+
+            segment <- segment_data |>
+                filter(chrom == chromosome, start <= pos, end >= pos) |>
+                mutate(
+                    segment_width = end - start
+                ) |>
+                arrange(segment_width)
+
+            if (nrow(segment) > 0) {
+                message(
+                    paste0("   - Found ", nrow(segment), " matching segments for mutation ", mutation_id)
+                )
+                message(
+                    paste0(
+                        "   - Mapped mutation ", mutation_id,
+                        " to segment: ", segment$chrom[1], ":",
+                        segment$start[1], "-", segment$end[1],
+                        " (", segment$major_cn[1], "/", segment$minor_cn[1], ")"
+                    )
+                )
+
+                pyclone_data$major_cn[[i]] <- segment$major_cn[[1]]
+                pyclone_data$minor_cn[[i]] <- segment$minor_cn[[1]]
+            }
+        }
+
+        ## Clean the outputs
+        data_list[[sample_id]]  <- pyclone_data |>
+            mutate(
+                mutation_id = paste0(chrom, ":", pos, ":", ref, ">", alt)
+            ) |>
+            dplyr::select(
+                mutation_id, ref_counts, var_counts, normal_cn,
+                minor_cn, major_cn, sample_id, genotype
+            )
+    }
+
+    data_list
 }

@@ -8,6 +8,16 @@ source(here::here("scripts/lib/study_lib.R"))
 
 ## Define colors
 study_colors <- list(
+    Alteration = c(
+        "AMP" = "#d6604d",
+        "GAIN" = "#f4a582",
+        "HOMDEL" = "#053061",
+        "DEL" = "#4393c3",
+        "SNV" = "#4c9340",
+        "substitution" = "#bf8125",
+        "insertion" = "#b51e2b",
+        "deletion" = "#66011b"
+    ),
     cna_class = c(
         "MULTI" = "#b2182b",
         "AMP" = "#d6604d",
@@ -24,6 +34,10 @@ study_colors <- list(
         "Post-FST" = "#FF7F00", 
         "Pre-FST" = "#1F78B4", 
         "U-DFSP" = "#33A02C"
+    ),
+    FST.Type = c(
+        FST = "#ea5b67",
+        Classic = "darkgray"
     ),
     Metastasis = c(
         "No" = "#A6CEE3", 
@@ -122,6 +136,14 @@ group_comparisons <- list(
         group1 = "Primary",
         group2 = "Metastasis"
     ),
+    
+    ## "---------------------------------------------------------------------"
+    ## unpaired primary and metastatic samples in FS-DFSP
+    ## "---------------------------------------------------------------------"
+    Unpaired_Primary_vs_Metastasis = list(
+        group1 = "Primary",
+        group2 = "Metastasis"
+    ),
 
     ## "---------------------------------------------------------------------"
     ## Paired classic and FST samples (Pre-FST and Post-FST)
@@ -153,3 +175,7 @@ MMR_genes <- c(
 
 ## WES Capture size
 capture_size <- 34 
+
+## Parallel processing settings
+mc_cores <- parallel::detectCores() - 10
+mc_cores <- 16

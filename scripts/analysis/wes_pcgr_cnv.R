@@ -98,7 +98,7 @@ for (gc in names(group_comparisons)) {
             pull(Sample.ID)
     }
 
-    pcgr_cytoband_stat_res[[gc]] <- GetGroupStatRes(
+    pcgr_cytoband_stat_res[[gc]] <- GetGroupStatDiff(
         data = pcgr_cytoband_tbl,
         group1_samples = group1_samples,
         group2_samples = group2_samples,
