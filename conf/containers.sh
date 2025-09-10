@@ -25,5 +25,4 @@ singularity pull --force --dir "${CONTAINER_DIR}" tabix.sif oras://community.wav
 singularity pull --force --dir "${CONTAINER_DIR}" vcf2tsvpy.sif oras://community.wave.seqera.io/library/vcf2tsvpy:0.6.1--234569ac32056c31
 singularity pull --force --dir "${CONTAINER_DIR}" pcgr.sif oras://ghcr.io/sigven/pcgr:2.2.1.singularity
 singularity pull --force --dir "${CONTAINER_DIR}" r.sif oras://community.wave.seqera.io/library/r-base_r-fs_r-here_r-optparse_pruned:6d3c4357c207ae65
-
-
+singularity pull --force --dir "${CONTAINER_DIR}" purecn.sif docker://markusriester/purecn:latest

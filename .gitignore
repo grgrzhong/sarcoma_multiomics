@@ -12,6 +12,7 @@ logs/
 slurm/
 /test/
 containers/
+container/
 work/
 
 results/
