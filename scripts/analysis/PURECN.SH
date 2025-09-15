@@ -2,7 +2,7 @@
 
 
 conda activate renv
-export CONTAINER_DIR="/mnt/f/projects/250224_sarcoma_multiomics/container"
+export CONTAINER_DIR="/mnt/f/projects/250224_sarcoma_multiomics/containers"
 export PURECN="/home/zhonggr/miniforge3/envs/renv/lib/R/library/PureCN/extdata"
 
 Rscript $PURECN/PureCN.R --help
@@ -24,7 +24,7 @@ export MUTECT2_DIR="${PROJECT_DIR}/data/wes/Mutect2"
 singularity exec \
     --bind ${REFERENCE_DIR} \
     ${CONTAINER_DIR}/purecn.sif \
-    Rscript $PURECN/IntervalFile.R \
+    Rscript /usr/local/lib/R/site-library/PureCN/extdata/IntervalFile.R \
         --in-file ${INTERVAL} \
         --fasta ${FASTA} \
         --off-target \
