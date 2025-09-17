@@ -567,21 +567,21 @@ SaveData(
 ## https://github.com/beroukhim-lab/ascets
 ## Get the hg38 cytoband data
 ascet_dir <- "scripts/modules/ascets"
-hg19_file <- here(ascet_dir, "cytoband_coordinates_hg19.txt")
-hg19_cytoband <- read_tsv(hg19_file, show_col_types = FALSE)
-data(cytobands.hg38)
-hg38_cytoband <- cytobands.hg38 |> 
-    as_tibble() |> 
-    dplyr::rename(arm = band) |> 
-    dplyr::select(-stain) |> 
-    dplyr::select(all_of(colnames(hg19_cytoband))) |> 
-    mutate(chrom = str_replace_all(chrom, "chr", ""))
+# hg19_file <- here(ascet_dir, "cytoband_coordinates_hg19.txt")
+# hg19_cytoband <- read_tsv(hg19_file, show_col_types = FALSE)
+# data(cytobands.hg38)
+# hg38_cytoband <- cytobands.hg38 |> 
+#     as_tibble() |> 
+#     dplyr::rename(arm = band) |> 
+#     dplyr::select(-stain) |> 
+#     dplyr::select(all_of(colnames(hg19_cytoband))) |> 
+#     mutate(chrom = str_replace_all(chrom, "chr", ""))
 
-write_tsv(
-    hg38_cytoband,
-    file = here(ascet_dir, "cytoband_coordinates_hg38.txt"),
-    quote = "none"
-)
+# write_tsv(
+#     hg38_cytoband,
+#     file = here(ascet_dir, "cytoband_coordinates_hg38.txt"),
+#     quote = "none"
+# )
 
 ## Prepare the data for ASCETS analysis
 required_input_cols <- c(
