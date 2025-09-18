@@ -829,25 +829,20 @@ ComplexGroupOncoplot(
 ## "========================================================================="
 ## Oncoplot significant diff events across groups - Gistic2 ----
 ## "========================================================================="
-## All mutated genes tends to not signficant if use padj < 0.05
-cnv_cytoband_mat <- GetVariantTypeMat(
-    data = pcgr_cnv_tbl,
-    variant_type = "cytoband",
-    variant_class = "cn_status",
-    is_somatic_matched = TRUE
-)
+stat_res_sig$gistic_cnv_cytoband
 
-cnv_cytobands <- list_rbind(stat_res_sig$pcgr_cnv_cytoband) |> 
-    dplyr::select(cytoband, alteration_type) |>
-    unite("cytoband", c(cytoband, alteration_type), sep = "_") |>
+cnv_cytobands <- list_rbind(stat_res_sig$gistic_cnv_cytoband) |> 
     distinct() |> 
     pull(cytoband)
 
-cnv_cytoband_mat <- cnv_cytoband_mat[cnv_cytobands, ]
+cnv_cytoband_mat <- gistic_cn_cytoband_mat[cnv_cytobands, ]
 
 sort_group_level = c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP")
 
 for (i in 2:length(sort_group_level)) {
+    
+    # main_group = sort_group_level[[i]]
+    main_group = sort_group_level[[4]]
 
     ComplexGroupOncoplot(
         mat = cnv_cytoband_mat,
@@ -856,13 +851,13 @@ for (i in 2:length(sort_group_level)) {
         split_by_group = "FST.Group",
         sort_group_level = c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP"),
         # sort_group_level = c("Classic", "FST"),
-        main_group = sort_group_level[[i]],
+        main_group = main_group,
         sample_annotation = c("FST.Group", "Metastasis", "Specimen.Nature"),
-        column_title = NULL,
+        column_title = "Gistic2 CNV Cytoband",
         width = 18,
         height = 12,
         dir = "figures/oncoplot",
-        filename = paste0("freq_sort_by_", sort_group_level[i])
+        filename = paste0("gistic2_cnv_cytoband_sort_by_", main_group, "frequency")
     )
 }
 
