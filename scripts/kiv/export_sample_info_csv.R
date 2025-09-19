@@ -11,7 +11,7 @@ bam_std_cols <- c(
 
 ## Get the include samples from the bam files
 # bam_dir <- here("/mnt/m/WES/DFSP/BAM")
-bam_dir <- here("data/wes/preprocessing/recalibrated")
+bam_dir <- here("data/WES/preprocessing/recalibrated")
 bam_files <- dir_ls(bam_dir, recurse = TRUE, glob = "*recalibrated.bam")
 samples <- path_file(bam_files) |>
     path_ext_remove() |> 
@@ -28,7 +28,7 @@ bam_tbl <- tibble(
     select(all_of(bam_std_cols))
 
 ## write to CSV
-out_dir <- "data/wes/sample_info"
+out_dir <- "data/WES/sample_info"
 
 write_excel_csv(bam_tbl, here(out_dir, "bam_all_samples.csv"))
 

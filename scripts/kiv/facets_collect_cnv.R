@@ -2,8 +2,8 @@
 source(here::here("bin/R/lib/study_lib.R"))
 
 ## List all CNV facet annotated TSV files
-facets_dir1 <- here("data/wes/variant_calling/cnv/facets")
-facets_dir2 <- here("data/wes/variant_calling/cnv/facets_test_normal")
+facets_dir1 <- here("data/WES/variant_calling/cnv/facets")
+facets_dir2 <- here("data/WES/variant_calling/cnv/facets_test_normal")
 
 facets_files1 <- dir_ls(facets_dir1, recurse = TRUE, glob = "*.annotated.tsv")
 

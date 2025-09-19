@@ -23,10 +23,10 @@ conda activate cnvkit
 ref_dir=/home/zhonggr/projects/250224_sarcoma_multiomics/data/reference
 reference=${ref_dir}/Gencode/gencode.hg38.v36.primary_assembly.fa
 target=${ref_dir}/Exome/xgen-exome-hyb-panel-v2-hg38_200bp_sorted_merged/xgen-exome-hyb-panel-v2-hg38_200bp_sorted_merged.bed
-bam_dir=/home/zhonggr/projects/250224_sarcoma_multiomics/data/wes/bam
+bam_dir=/home/zhonggr/projects/250224_sarcoma_multiomics/data/WES/bam
 
 ## Define output directory
-work_dir=/home/zhonggr/projects/250224_sarcoma_multiomics/data/wes/cnvkit
+work_dir=/home/zhonggr/projects/250224_sarcoma_multiomics/data/WES/cnvkit
 mkdir -p ${work_dir}
 cnvkit_ref_dir=${work_dir}/cnvkit_reference
 cnvkit_norm_ref=${cnvkit_ref_dir}/cnvkit_pooled_normal_reference.cnn

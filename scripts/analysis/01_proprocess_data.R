@@ -59,7 +59,7 @@ for (sample_group in names(sample_groups)) {
 ## "==========================================================================="
 ## Preprocess WES CNV FACETS segment data  ----
 ## "==========================================================================="
-cnv_facet_dir <- here("data/wes/CNV/cnv_facets")
+cnv_facet_dir <- here("data/WES/CNV/cnv_facets")
 
 tsv_files <- dir_ls(cnv_facet_dir, glob = "*.tsv", recurse = TRUE) |> 
     keep(~ str_detect(path_file(.x), "^[^.]+\\.tsv$"))
@@ -146,7 +146,7 @@ print(missed_purity_ploidy)
 ## "==========================================================================="
 ## Preprocess WES CNV FACETS CNV gene (bedtools annotated) data  ----
 ## "==========================================================================="
-cnv_facet_dir <- here("data/wes/CNV/cnv_facets")
+cnv_facet_dir <- here("data/WES/CNV/cnv_facets")
 
 tsv_files <- dir_ls(cnv_facet_dir, glob = "*.annotated.tsv", recurse = TRUE)
 
@@ -376,7 +376,7 @@ for (i in names(sample_categories)) {
         group_data <- gistic2_data |> 
             filter(Sample %in% sample_groups[[sample_group]])
 
-        out_dir <- here("data/wes/GISTIC2", paste0(i, "/", sample_group))
+        out_dir <- here("data/WES/GISTIC2", paste0(i, "/", sample_group))
         
         dir_create(out_dir)
         
@@ -396,7 +396,7 @@ for (i in names(sample_categories)) {
 ## "==========================================================================="
 ## Merge all SNV/Indel data from PCGR annotation
 pcgr_snv_indel_raw <- CollectPCGRSNVINDELData(
-    dir = "data/wes/PCGR", 
+    dir = "data/WES/PCGR", 
     sheet_name = "SOMATIC_SNV_INDEL"
 )
 
@@ -740,7 +740,7 @@ SaveData(
 ## "==========================================================================="
 ## Preprocess GISTIC2 CNV data --------------
 ## "==========================================================================="
-gistic_dir <- here("data/wes/GISTIC2/somatic_matched")
+gistic_dir <- here("data/WES/GISTIC2/somatic_matched")
 gistic_data <- GetGisticCNData(
     gistic_dir = gistic_dir,
     group = "all_tumors",
@@ -775,6 +775,16 @@ pcgr_snv_indel_tbl <- FilterPCGRSNVIndels(
     max_population_frequency = 0.001
 )
 
+## Total variants = 8003, 1 sample (DFSP-087-T) detect no variants
+pcgr_snv_indel_tbl <- FilterPCGRSNVIndels(
+    pcgr_snv_indel_raw,
+    min_dp_tumor = 20,
+    min_vaf_tumor = 0.05,
+    min_dp_control = 10,
+    max_vaf_control = 0.01,
+    max_population_frequency = 0.001
+)
+
 # pcgr_snv_indel_tbl <- LoadData(
 #     dir = "data/processed",
 #     filename = "wes_pcgr_snv_indels_tbl"
@@ -784,23 +794,23 @@ clinical_info <- LoadClinicalInfo() |>
     filter(FST.Group %in% c("Pre-FST", "Post-FST")) |> 
     filter(Number.of.samples.per.patient >=2)
 
-snv_indel_data <- pcgr_snv_indel_raw |> 
+snv_indel_data <- pcgr_snv_indel_tbl |> 
     filter(sample_id %in% clinical_info$Sample.ID)
 
 pyclone_data <- GetPycloneInputData(
     snv_indel_data = snv_indel_data,
-    vcf_dir = "data/wes/Mutect2",
-    cnv_facet_dir = "data/wes/CNV/cnv_facets"
+    vcf_dir = "data/WES/Mutect2",
+    cnv_facet_dir = "data/WES/CNV/cnv_facets"
 )
 
-pyclone_dir <- "data/wes/PyClone"
+pyclone_dir <- "data/WES/PyClone_3"
 
 ## Save the Pyclone input data
 for (i in names(pyclone_data)) {
 
     case_id <- str_extract(i, "DFSP-[0-9]+")
 
-    # dir_delete(here("data/wes/PyClone", case_id))
+    # dir_delete(here("data/WES/PyClone", case_id))
     dir_create(here(pyclone_dir, case_id))
 
     message(
@@ -837,3 +847,18 @@ for (i in names(pyclone_data)) {
 #     dir = "data/processed", 
 #     filename = "wes_pcgr_DFSP_cohort_merged_snv_indels_obj"
 # )
+
+rna_mat <- "data/RNA/merged.featureCounts.clean.txt"
+rna_mat <- read_tsv(rna_mat, show_col_types = FALSE)
+samples <- colnames(rna_mat)[-1]
+length(samples)
+clinical_info <- LoadClinicalInfo(is_somatic_matched = FALSE) |> 
+    select(Sample.ID, FST.Group, Metastasis)
+
+metadata <- tibble(Sample.ID = samples) |> 
+    left_join(clinical_info, by = "Sample.ID")
+
+write_csv(
+    metadata,
+    file = here("data/clinical/DFSP_RNAseq_metadata.csv")
+)

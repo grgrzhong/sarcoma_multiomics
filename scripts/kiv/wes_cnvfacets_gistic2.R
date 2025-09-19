@@ -63,7 +63,7 @@ for (sample_group in names(sample_groups)) {
 ## "==========================================================================="
 ## Collect WES CNV Facet data  ----
 ## "==========================================================================="
-cnv_facet_dir <- here("data/wes/CNV/cnv_facets")
+cnv_facet_dir <- here("data/WES/CNV/cnv_facets")
 
 tsv_files <- dir_ls(cnv_facet_dir, glob = "*.tsv", recurse = TRUE) |> 
     keep(~ str_detect(path_file(.x), "^[^.]+\\.tsv$"))
@@ -241,7 +241,7 @@ for (i in names(sample_categories)) {
         group_data <- gistic2_data |> 
             filter(Sample %in% sample_groups[[sample_group]])
 
-        out_dir <- here("data/wes/GISTIC2", paste0(i, "/", sample_group))
+        out_dir <- here("data/WES/GISTIC2", paste0(i, "/", sample_group))
         
         dir_create(out_dir)
         
@@ -265,9 +265,9 @@ gistic2_data |> pull(Sample) |> unique() |> length()
 ## Do the analysis for both somatic matched (147) and all samples (161)
 gistic_dirs <- list(
     ## Tumor samples with matched normal sample
-    somatic_matched = here("data/wes/GISTIC2/somatic_matched"),
+    somatic_matched = here("data/WES/GISTIC2/somatic_matched"),
     ## All samples, including tumor samples without matched normal
-    somatic_unmatched = here("data/wes/GISTIC2/somatic_unmatched")
+    somatic_unmatched = here("data/WES/GISTIC2/somatic_unmatched")
 )
 
 ## Run the fisher's exact test for each group comparison
@@ -452,7 +452,7 @@ SavePlot(
 ## "==========================================================================="
 ## Entire cohort gistic2 data
 all_tumour_gistic <- LoadGistic2Data(
-    gistic_dir = "data/wes/GISTIC2/somatic_matched",
+    gistic_dir = "data/WES/GISTIC2/somatic_matched",
     group = "all_tumors"
 )
 
@@ -643,11 +643,11 @@ GenerateCytobandOncoplot(
 ## Gistic oncoplot all tumors ----
 ## "==========================================================================="
 gistic_dirs <- list(
-    somatic_matched = here("data/wes/GISTIC2/somatic_matched"),
-    somatic_unmatched = here("data/wes/GISTIC2/somatic_unmatched")
+    somatic_matched = here("data/WES/GISTIC2/somatic_matched"),
+    somatic_unmatched = here("data/WES/GISTIC2/somatic_unmatched")
 )
 
-gistic_dir <- here("data/wes/GISTIC2/somatic_matched")
+gistic_dir <- here("data/WES/GISTIC2/somatic_matched")
 
 gistic_obj <- readGistic(
     gisticAllLesionsFile = here(gistic_dir, "all_tumors", "all_lesions.conf_99.txt"),
@@ -724,11 +724,11 @@ plot_para <- list(
             plot_filename = "epic_cnv_gistic2"
         ),
         somatic_matched_samples = list(
-            gistic_dir = here("data/wes/GISTIC2/somatic_matched"),
+            gistic_dir = here("data/WES/GISTIC2/somatic_matched"),
             plot_filename = "wes_cnvfacets_gistic2_somatic_matched_samples"
         ),
         all_samples = list(
-            gistic_dir = here("data/wes/GISTIC2/somatic_unmatched"),
+            gistic_dir = here("data/WES/GISTIC2/somatic_unmatched"),
             plot_filename = "wes_cnvfacets_gistic2_all_samples"   
         )
     ),
@@ -791,7 +791,7 @@ for (i in names(plot_para$gistic_data)) {
 clinical_info <- LoadClinicalInfo()
 
 ## Output directories
-gistic_dir <- "data/wes/GISTIC2/somatic_matched"
+gistic_dir <- "data/WES/GISTIC2/somatic_matched"
 # group_name <- "all_tumors"
 
 sample_groups <- LoadSampleGroupInfo()
@@ -816,7 +816,7 @@ for (group in groups) {
     ## Plot parameters
     width <- 8
     height <- 4
-    out_dir <- "figures/wes/gistic2/cnv_facets"
+    out_dir <- "figures/WES/gistic2/cnv_facets"
 
     dir_create(out_dir)
 
@@ -1015,7 +1015,7 @@ for (img in c("png", "pdf")) {
 
 # PlotGistic2Chrom <- 
 
-# scores <- "/mnt/f/projects/sarcoma_multiomics/data/wes/GISTIC2/cnv_facets/FS-DFSP/scores.gistic"
+# scores <- "/mnt/f/projects/sarcoma_multiomics/data/WES/GISTIC2/cnv_facets/FS-DFSP/scores.gistic"
 
 # library(BSgenome.Hsapiens.UCSC.hg38)
 # chrom_info <- tibble(

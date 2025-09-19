@@ -5,12 +5,12 @@ source(here::here("scripts/lib/study_lib.R"))
 
 ## Merge all the annovar annoated variants -------------
 data_dir <- "data/processed"
-figure_dir <- "figures/wes"
+figure_dir <- "figures/WES"
 
 ## "=========================================================================="
 ## Collect the annovar annotated variants
 ## "=========================================================================="
-annovar_dir <- "data/wes/Mutect2"
+annovar_dir <- "data/WES/Mutect2"
 annovar_tbl <- CollectAnnovarData(dir = annovar_dir)
 filename <- "wes_annovar_DFSP_cohort_merged_tbl"
 SaveData(annovar_tbl, dir = data_dir, filename = filename)

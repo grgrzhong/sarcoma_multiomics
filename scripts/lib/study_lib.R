@@ -797,7 +797,7 @@ LoadCancerHotspot <- function(
 CollectAnnovarData <- function(
     dir,
     is_save = FALSE,
-    save_dir = "data/wes/annotation/merged"
+    save_dir = "data/WES/annotation/merged"
 ) {
     
     ## The annovar directory should contain the annovar output files
@@ -1506,7 +1506,7 @@ addDFSPGroupInfo <- function(maf_tbl) {
 }
 
 CollectPCGRCNVData <- function(
-    dir = "data/wes/PCGR", 
+    dir = "data/WES/PCGR", 
     sig_gain_thres = NULL
 ) {
 
@@ -1557,7 +1557,7 @@ CollectPCGRCNVData <- function(
 }
 
 CollectPCGRSNVINDELData <- function(
-    dir = "data/wes/PCGR", 
+    dir = "data/WES/PCGR", 
     sheet_name="SOMATIC_SNV_INDEL"
 ) {
     
@@ -2806,7 +2806,7 @@ compare_gistic_transformation <- function(untransformed_gistic, transformed_gist
     
     ## Create results directory if it doesn't exist
     dir.create(here("results"), recursive = TRUE, showWarnings = FALSE)
-    dir.create(here("figures/wes/gistic2/comparative"), recursive = TRUE, showWarnings = FALSE)
+    dir.create(here("figures/WES/gistic2/comparative"), recursive = TRUE, showWarnings = FALSE)
     
     ## Get sample counts for proper frequency calculation
     untrans_total_samples <- length(getSampleSummary(untransformed_gistic)$Tumor_Sample_Barcode)
@@ -3137,7 +3137,7 @@ create_transformation_plots <- function(cytoband_results, output_prefix) {
         
         ## Save plot
         for (img in c("png", "pdf")) {
-            file <- here("figures/wes/gistic2/comparative", 
+            file <- here("figures/WES/gistic2/comparative", 
                         paste0(output_prefix, "_enriched_cnas.", img))
             
             if (img == "png") {
@@ -3841,7 +3841,7 @@ BoxPlotCompareGroups <- function(
 }
 
 PlotGisticGroupComparsion <- function(
-    gistic_dir = "data/wes/gistic2/somatic_matched",
+    gistic_dir = "data/WES/gistic2/somatic_matched",
     groups = c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP"),
     is_somatic_matched = FALSE,
     fdrCutOff = 0.25,
@@ -7068,7 +7068,7 @@ GisticChromPlot <- function(
 }
 
 LoadGisticScore <- function(
-    gistic_dir = "data/wes/GISTIC2/somatic_matched",
+    gistic_dir = "data/WES/GISTIC2/somatic_matched",
     group = "U-DFSP"
 ) {
     
@@ -8733,8 +8733,8 @@ GetGroupComparisonRes <- function(mat) {
 
 GetPycloneInputData <- function(
     snv_indel_data, ## snv/indel data
-    vcf_dir = "data/wes/Mutect2",
-    cnv_facet_dir = "data/wes/CNV/cnv_facets"
+    vcf_dir = "data/WES/Mutect2",
+    cnv_facet_dir = "data/WES/CNV/cnv_facets"
 
 ) {
     all_sample_ids <- unique(snv_indel_data$sample_id)

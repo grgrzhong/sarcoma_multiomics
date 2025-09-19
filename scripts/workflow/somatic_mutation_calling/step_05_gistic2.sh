@@ -13,7 +13,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/conf/config.sh"
 # Activate the conda environment
 conda activate gistic2
 
-export GISTIC2_DIR="/mnt/f/projects/250224_sarcoma_multiomics/data/wes/GISTIC2/somatic_matched"
+export GISTIC2_DIR="/mnt/f/projects/250224_sarcoma_multiomics/data/WES/GISTIC2/somatic_matched"
 export GISTIC_QVL_THRESHOLD=0.25
 export GISTIC_PARALLEL_JOBS=6
 
@@ -21,12 +21,12 @@ export GISTIC_PARALLEL_JOBS=6
 mkdir -p "$GISTIC2_DIR"
 
 ## Test file
-# segment_file="/mnt/f/projects/sarcoma_multiomics/data/wes/GISTIC2/FS-DFSP/FS-DFSP.tsv"
+# segment_file="/mnt/f/projects/sarcoma_multiomics/data/WES/GISTIC2/FS-DFSP/FS-DFSP.tsv"
 # segment_file="/mnt/f/projects/250224_sarcoma_multiomics/data/temp/GISTIC2/FGFR_mskimpact_segments/FGFR_mskimpact_segments.tsv"
-# segment_file="/mnt/f/projects/250224_sarcoma_multiomics/data/wes/GISTIC2/somatic_matched/all_tumors/all_tumors.tsv"
-# segment_file="/mnt/f/projects/250224_sarcoma_multiomics/data/wes/test/all_tumors/all_tumors2.tsv"
-# segment_file="/mnt/f/projects/250224_sarcoma_multiomics/data/wes/test/somatic_matched/FS-DFSP/FS-DFSP.tsv"
-# segment_file="/mnt/f/projects/250224_sarcoma_multiomics/data/wes/GISTIC2/somatic_matched/FST/FST.tsv"
+# segment_file="/mnt/f/projects/250224_sarcoma_multiomics/data/WES/GISTIC2/somatic_matched/all_tumors/all_tumors.tsv"
+# segment_file="/mnt/f/projects/250224_sarcoma_multiomics/data/WES/test/all_tumors/all_tumors2.tsv"
+# segment_file="/mnt/f/projects/250224_sarcoma_multiomics/data/WES/test/somatic_matched/FS-DFSP/FS-DFSP.tsv"
+# segment_file="/mnt/f/projects/250224_sarcoma_multiomics/data/WES/GISTIC2/somatic_matched/FST/FST.tsv"
 
 # Function to run GISTIC2 on one file
 run_gistic2() {

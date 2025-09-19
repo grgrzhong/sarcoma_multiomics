@@ -159,11 +159,11 @@ GisticComplexGroupOncoplot(
 ## Gistic oncoplot all tumors ----
 ## "==========================================================================="
 gistic_dirs <- list(
-    somatic_matched = here("data/wes/GISTIC2/somatic_matched"),
-    somatic_unmatched = here("data/wes/GISTIC2/somatic_unmatched")
+    somatic_matched = here("data/WES/GISTIC2/somatic_matched"),
+    somatic_unmatched = here("data/WES/GISTIC2/somatic_unmatched")
 )
 
-gistic_dir <- here("data/wes/GISTIC2/somatic_matched")
+gistic_dir <- here("data/WES/GISTIC2/somatic_matched")
 
 gistic_obj <- readGistic(
     gisticAllLesionsFile = here(gistic_dir, "all_tumors", "all_lesions.conf_99.txt"),
@@ -240,11 +240,11 @@ plot_para <- list(
             plot_filename = "epic_cnv_gistic2"
         ),
         somatic_matched_samples = list(
-            gistic_dir = here("data/wes/GISTIC2/somatic_matched"),
+            gistic_dir = here("data/WES/GISTIC2/somatic_matched"),
             plot_filename = "wes_cnvfacets_gistic2_somatic_matched_samples"
         ),
         all_samples = list(
-            gistic_dir = here("data/wes/GISTIC2/somatic_unmatched"),
+            gistic_dir = here("data/WES/GISTIC2/somatic_unmatched"),
             plot_filename = "wes_cnvfacets_gistic2_all_samples"   
         )
     ),
@@ -307,7 +307,7 @@ for (i in names(plot_para$gistic_data)) {
 clinical_info <- LoadClinicalInfo()
 
 ## Output directories
-gistic_dir <- "data/wes/GISTIC2/somatic_matched"
+gistic_dir <- "data/WES/GISTIC2/somatic_matched"
 # group_name <- "all_tumors"
 
 sample_groups <- LoadSampleGroupInfo()
@@ -332,7 +332,7 @@ for (group in groups) {
     ## Plot parameters
     width <- 8
     height <- 4
-    out_dir <- "figures/wes/gistic2/cnv_facets"
+    out_dir <- "figures/WES/gistic2/cnv_facets"
 
     dir_create(out_dir)
 
@@ -531,7 +531,7 @@ for (img in c("png", "pdf")) {
 
 # PlotGistic2Chrom <- 
 
-# scores <- "/mnt/f/projects/sarcoma_multiomics/data/wes/GISTIC2/cnv_facets/FS-DFSP/scores.gistic"
+# scores <- "/mnt/f/projects/sarcoma_multiomics/data/WES/GISTIC2/cnv_facets/FS-DFSP/scores.gistic"
 
 # library(BSgenome.Hsapiens.UCSC.hg38)
 # chrom_info <- tibble(

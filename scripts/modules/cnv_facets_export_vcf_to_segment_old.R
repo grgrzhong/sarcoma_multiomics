@@ -264,8 +264,8 @@ if (!interactive()) {
 }
 
 # test
-# input_dir <- "/home/zhonggr/projects/250224_sarcoma_multiomics/data/wes/variant_calling/cnv/facets"
-# input_dir <- "/home/zhonggr/projects/250224_sarcoma_multiomics/data/wes/variant_calling/cnv/facets_test_normal"
+# input_dir <- "/home/zhonggr/projects/250224_sarcoma_multiomics/data/WES/variant_calling/cnv/facets"
+# input_dir <- "/home/zhonggr/projects/250224_sarcoma_multiomics/data/WES/variant_calling/cnv/facets_test_normal"
 # process_files(input_dir)
 
 ## Delete all .txt files in the directory

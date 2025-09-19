@@ -12,13 +12,13 @@ export REFERENCE_DIR="/mnt/f/Reference"
 export FASTA="${REFERENCE_DIR}/Gencode/gencode.hg38.v36.primary_assembly.fa"
 export INTERVAL="${REFERENCE_DIR}/Exome/xgen-exome-hyb-panel-v2-hg38_200bp_sorted_merged/xgen-exome-hyb-panel-v2-hg38_200bp_sorted_merged.bed"
 export PURECN_REF_DIR="${REFERENCE_DIR}/PureCN"
-export PURECN_DIR="${PROJECT_DIR}/data/wes/PureCN"
-export BAM_DIR="${PROJECT_DIR}/data/wes/BAM"
+export PURECN_DIR="${PROJECT_DIR}/data/WES/PureCN"
+export BAM_DIR="${PROJECT_DIR}/data/WES/BAM"
 
 export PON_DIR="${REFERENCE_DIR}/PON-Mutect"
 export PON="${PON_DIR}/pon.vcf.gz"
 
-export MUTECT2_DIR="${PROJECT_DIR}/data/wes/Mutect2"
+export MUTECT2_DIR="${PROJECT_DIR}/data/WES/Mutect2"
 
 ## Generate reference files for PureCN
 singularity exec \

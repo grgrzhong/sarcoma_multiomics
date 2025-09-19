@@ -3,7 +3,7 @@
 source(here::here("bin/R/lib/study_lib.R"))
 
 ## List all cnv facet VCF files
-cnv_facet_dir <- here("data/wes/variant_calling/cnv/facets")
+cnv_facet_dir <- here("data/WES/variant_calling/cnv/facets")
 
 vcf_files <- list.files(
     path = cnv_facet_dir,

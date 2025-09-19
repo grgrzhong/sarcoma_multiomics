@@ -4,13 +4,13 @@ library(ggbeeswarm)
 source(here::here("bin/R/lib/study_lib.R"))
 
 # Mutect2 with balcklist and RepeatMasker filtering, tumour normal
-vcf_dir1 <- here("data/wes/mutect2")
+vcf_dir1 <- here("data/WES/mutect2")
 
 # Mutect2 with balcklist and RepeatMasker filtering, tumour only
-# vcf_dir2 <- here("data/wes/mutect2_tumour_only")
+# vcf_dir2 <- here("data/WES/mutect2_tumour_only")
 
 # Mutect2 without blacklisting and RepeatMasker filtering, tumour normal
-vcf_dir2 <- here("data/wes/mutect2_old")
+vcf_dir2 <- here("data/WES/mutect2_old")
 
 # group_name <- c("Mutect2_Tumour_Normal", "Mutect2_Tumour_Only")
 group_name <- c("With_Black_RepeatMasker_filter", "Without_Black_RepeatMasker_filter")

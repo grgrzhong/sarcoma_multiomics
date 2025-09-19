@@ -165,6 +165,6 @@ if (!interactive()) {
 }
 
 ## Test
-input_dir <- "/mnt/f/projects/250224_sarcoma_multiomics/data/wes/cnv_facets"
+input_dir <- "/mnt/f/projects/250224_sarcoma_multiomics/data/WES/cnv_facets"
 output_file <- "/mnt/f/projects/250224_sarcoma_multiomics/data/collect/dfsp_wes_cnvfacets_cohort_segments_gistic2.tsv"
 collect_segments_to_gistic2(input_dir, output_file)

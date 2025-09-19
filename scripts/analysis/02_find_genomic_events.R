@@ -853,11 +853,11 @@ for (i in 2:length(sort_group_level)) {
         # sort_group_level = c("Classic", "FST"),
         main_group = main_group,
         sample_annotation = c("FST.Group", "Metastasis", "Specimen.Nature"),
-        column_title = "Gistic2 CNV Cytoband",
+        column_title = paste0("Gistic2 CNV Cytoband", " - sort by ", main_group),
         width = 18,
         height = 12,
         dir = "figures/oncoplot",
-        filename = paste0("gistic2_cnv_cytoband_sort_by_", main_group, "frequency")
+        filename = paste0("gistic2_cnv_cytoband_sort_by_", main_group, "_frequency")
     )
 }
 

@@ -3,10 +3,10 @@ library(ggbeeswarm)
 source(here::here("bin/R/lib/study_lib.R"))
 
 # Set data directory
-unfiltered_dir <- here("data/wes/variant_calling/mutect2_without_black_repeat_filter")
+unfiltered_dir <- here("data/WES/variant_calling/mutect2_without_black_repeat_filter")
 
 ## mutect2 = mutect2_filter
-filtered_dir <- here("data/wes/variant_calling/mutect2_with_black_repeat_filter_new")
+filtered_dir <- here("data/WES/variant_calling/mutect2_with_black_repeat_filter_new")
 
 # Set output directory
 out_dir <- here("results/black_repeat_filter")

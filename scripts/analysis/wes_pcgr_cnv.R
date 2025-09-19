@@ -554,7 +554,7 @@ for (i in names(plot_para)) {
 #         unique()
 # )
 
-gistic_dir <- "data/wes/GISTIC2/somatic_matched"
+gistic_dir <- "data/WES/GISTIC2/somatic_matched"
 
 plots <- list()
 for (group in FST.Group) {

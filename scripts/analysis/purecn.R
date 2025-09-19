@@ -5,7 +5,7 @@
 library(PureCN)
 library(fs)
 
-purecn_dir <- "data/wes/PureCN"
+purecn_dir <- "data/WES/PureCN"
 
 normal_coverage_files <- dir_ls(
     purecn_dir,

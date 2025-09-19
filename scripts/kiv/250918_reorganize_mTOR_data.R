@@ -145,3 +145,10 @@ write_xlsx(
     checked_project,
     here(data_dir, "250918_Master_Project_with_Sanger_Check.xlsx")
 )
+
+checked_project |> 
+    filter(
+        `mTOR-1 Sanger Result` == "No" |
+        `mTOR-2 Sanger Result` == "No" |
+        `mTOR-3 Sanger Result` == "No"
+    )

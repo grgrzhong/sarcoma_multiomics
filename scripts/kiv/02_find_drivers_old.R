@@ -335,7 +335,7 @@ clinical_info <- LoadClinicalInfo()
 cohort_size <- nrow(clinical_info)
 
 ## Do the analysis for both somatic matched (147) and all samples (161)
-gistic_dirs <- dir_ls(here("data/wes/GISTIC2"))
+gistic_dirs <- dir_ls(here("data/WES/GISTIC2"))
 dir_names <- path_file(gistic_dirs)
 gistic_dirs <- setNames(gistic_dirs, dir_names)
 gistic_dir <- gistic_dirs[["somatic_matched"]]
@@ -557,7 +557,7 @@ mafbarplot(
 )
 
 ## Plot the summary of variants
-file <- here("figures/wes/pcgr/WES_DFSP_PCGR_cohort_maf_summary.png")
+file <- here("figures/WES/pcgr/WES_DFSP_PCGR_cohort_maf_summary.png")
 png(
     file = file, width = 8, height = 6.5,
     type = "cairo", units = "in", res = 300
@@ -600,7 +600,7 @@ message(paste("Median number of mutations per tumour = ", variants_median))
 ## "==========================================================================="
 ## Estimate DFSP TMB  ----
 ## "==========================================================================="
-file <- here("figures/wes/pcgr/WES_PCGR_DFSP_cohort_tmb.png")
+file <- here("figures/WES/pcgr/WES_PCGR_DFSP_cohort_tmb.png")
 png(
     file = file, width = 6, height = 5, 
     type = "cairo", units = "in", res = 300
@@ -755,7 +755,7 @@ for (group_column in group_columns) {
 ## "========================================================================="
 ## Known oncogenic singaling pathways ----
 ## "========================================================================="
-file <- here("figures/wes/dfsp_wes_pcgr_cohort_oncogenic_pathways.png")
+file <- here("figures/WES/dfsp_wes_pcgr_cohort_oncogenic_pathways.png")
 png(
     file = file, width = 8, height = 6, 
     type = "cairo", units = "in", res = 300
@@ -777,7 +777,7 @@ dev.off()
 ## "========================================================================="
 ## Exclusive or co-occurring set of genes ----
 ## "========================================================================="
-file <- here("figures/wes/dfsp_wes_pcgr_cohort_somatic_interactions.png")
+file <- here("figures/WES/dfsp_wes_pcgr_cohort_somatic_interactions.png")
 png(
     file = file, width = 8, height = 6, 
     type = "cairo", units = "in", res = 300
@@ -948,7 +948,7 @@ tmb_tbl <- tmb_data |>
     as.data.frame()
 
 ## Genes enriched in FST groups or metastasis
-file <- here("figures/wes/dfsp_wes_pcgr_cohort_oncoplot_sig_genes.png")
+file <- here("figures/WES/dfsp_wes_pcgr_cohort_oncoplot_sig_genes.png")
 png(
     file = file, width = 12, height = 8,
     type = "cairo", units = "in", res = 300
@@ -1044,7 +1044,7 @@ show_genes <- c(
     unique()
 
 file <- here(
-        paste0("figures/wes/dfsp_wes_pcgr_cohort_oncoplot_public_top.pdf")
+        paste0("figures/WES/dfsp_wes_pcgr_cohort_oncoplot_public_top.pdf")
     )
     pdf(file = file, width = 8, height = 18)
     # par(oma = c(0, 1, 0.5, 0))
@@ -1077,7 +1077,7 @@ for (i in names(dfsp_public_cohorts)) {
     )
 
     file <- here(
-        paste0("figures/wes/dfsp_wes_pcgr_cohort_oncoplot_public_", 
+        paste0("figures/WES/dfsp_wes_pcgr_cohort_oncoplot_public_", 
         i, ".png")
     )
     png(
@@ -1253,7 +1253,7 @@ tmb_tbl <- tmb_data |>
     dplyr::select(tsb, tmb) |> 
     as.data.frame()
 
-file <- here("figures/wes/dfsp_wes_pcgr_cohort_oncoplot.png") 
+file <- here("figures/WES/dfsp_wes_pcgr_cohort_oncoplot.png") 
 png(
     file = file, width = 12, height = 8,
     type = "cairo", units = "in", res = 300

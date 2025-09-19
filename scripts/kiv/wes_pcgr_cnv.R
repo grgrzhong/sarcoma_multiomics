@@ -23,7 +23,7 @@ source(here::here("conf/study_conf.R"))
 ## Preprocess PCGR CNV data --------------
 ## "==========================================================================="
 ## Merge all PCGR outputs
-pcgr_dir <- "data/wes/PCGR"
+pcgr_dir <- "data/WES/PCGR"
 pcgr_cna_raw <- CollectPCGRCNVData(dir = pcgr_dir)
 
 unique(pcgr_cna_raw$event_type)
@@ -304,7 +304,7 @@ peak_label_list <- list(
 
 # peak_label <- c("chr7:q36.1_DEL", "chr6:p21.33_HOMDEL")
 
-gistic_dir <- "data/wes/GISTIC2/somatic_matched"
+gistic_dir <- "data/WES/GISTIC2/somatic_matched"
 
 plots <- list()
 for (group in FST.Group) {

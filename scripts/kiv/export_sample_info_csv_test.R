@@ -1,7 +1,7 @@
 # Load required libraries
 source(here::here("lib/R/study_lib.R"))
 
-sample_info_dir <- here("data/wes/sample_info")
+sample_info_dir <- here("data/WES/sample_info")
 
 tumour_only_samples <- here(sample_info_dir, "tumour_only_samples.txt")
 tumour_only_samples <- readLines(tumour_only_samples)
@@ -14,43 +14,43 @@ bam_all_samples <- read_csv(bam_all_samples)
 write_excel_csv(
     bam_all_samples |>
         filter(sample %in% tumour_only_samples),
-    here("data/wes/sample_info/bam_tumour_only.csv")
+    here("data/WES/sample_info/bam_tumour_only.csv")
 )
 
 write_excel_csv(
         bam_all_samples |>
         filter(patient %in% "DFSP-001"),
-    here("data/wes/sample_info/bam_test1.csv")
+    here("data/WES/sample_info/bam_test1.csv")
 )
 
 write_excel_csv(
         bam_all_samples |>
         filter(patient %in% c("DFSP-001", "DFSP-106")),
-    here("data/wes/sample_info/bam_test2.csv")
+    here("data/WES/sample_info/bam_test2.csv")
 )
 
 write_excel_csv(
         bam_all_samples |>
         filter(patient %in% c("DFSP-001", "DFSP-106", "DFSP-198")),
-    here("data/wes/sample_info/bam_test3.csv")
+    here("data/WES/sample_info/bam_test3.csv")
 )
 
 write_excel_csv(
         bam_all_samples |>
         filter(patient %in% c("DFSP-001", "DFSP-106", "DFSP-198")),
-    here("data/wes/sample_info/bam_test3.csv")
+    here("data/WES/sample_info/bam_test3.csv")
 )
 
 write.csv(
     tumour_only_samples, 
-    file=here("data/wes/sample_info/tumour_only_samplesheet.csv"), 
+    file=here("data/WES/sample_info/tumour_only_samplesheet.csv"), 
     row.names=FALSE, 
     na = "",
     quote = FALSE
 )
 
-vcf_dir <- here("data/wes/variant_calling/mutect2")
-bam_dir <- here("data/wes/preprocessing/recalibrated")
+vcf_dir <- here("data/WES/variant_calling/mutect2")
+bam_dir <- here("data/WES/preprocessing/recalibrated")
 
 # Find the recalibrated BAM files
 bam_files <- dir_ls(bam_dir, recurse = TRUE, glob = "*recalibrated.bam")
@@ -104,7 +104,7 @@ vcf_samplesheet <- samplesheet |>
 
 write_excel_csv(
     vcf_samplesheet,
-    here("data/wes/csv/mutect2_call_vcf.csv")
+    here("data/WES/csv/mutect2_call_vcf.csv")
 )
 
 # tumour samples without matched normal
@@ -119,7 +119,7 @@ normal_ids <- grep(
     vcf_samplesheet$sample_id, 
 )
 
-sample_info <- read_csv(here("data/wes/sample_info/samplesheet.csv")) |> 
+sample_info <- read_csv(here("data/WES/sample_info/samplesheet.csv")) |> 
     select(patient, sample, status)
 
 assume_normal_ids <- paste0(sample_info$patient, "-N") |> unique()
@@ -144,5 +144,5 @@ tumour_only_samples <- sample_info |>
 # Write tumour-only samples to a text file
 write_lines(
     tumour_only_samples,
-    here("data/wes/sample_info/tumour_only_samples.txt")
+    here("data/WES/sample_info/tumour_only_samples.txt")
 )

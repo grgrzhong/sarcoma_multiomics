@@ -110,5 +110,5 @@ write.table(
 )
 
 ## example
-# opt$input <- "/mnt/f/projects/sarcoma_multiomics/data/wes/CNV/cnv_facets"
-# opt$output <- "/mnt/f/projects/sarcoma_multiomics/data/wes/Processed/cnv_facets_DFSP_cohort_gistic2.tsv"
+# opt$input <- "/mnt/f/projects/sarcoma_multiomics/data/WES/CNV/cnv_facets"
+# opt$output <- "/mnt/f/projects/sarcoma_multiomics/data/WES/Processed/cnv_facets_DFSP_cohort_gistic2.tsv"
