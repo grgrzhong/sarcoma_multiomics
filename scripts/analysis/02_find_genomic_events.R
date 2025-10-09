@@ -283,7 +283,7 @@ sarcoma_cnv_gene <- sarcoma_data$cna_gene_data |>
     pull(symbol)
 
 ## Other public DFSP studies
-DFSP_study_data <- LoadDFSPStudyData()
+DFSP_study_data <- LoadPublicDFSPStudyData()
 
 public_cnv_gene_DFSP <- DFSP_study_data$smith_2025
 

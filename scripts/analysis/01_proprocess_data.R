@@ -144,8 +144,43 @@ missed_purity_ploidy <- purity_ploidy_data |>
 print(missed_purity_ploidy)
 
 ## "==========================================================================="
-## Preprocess WES CNV FACETS CNV gene (bedtools annotated) data  ----
+## Calculate WES CNV FACETS segment FGA  ----
 ## "==========================================================================="
+fga_list <- list()
+
+for (cnv_file in tsv_files) {
+    
+    sample_name <- path_file(cnv_file) |> str_remove("\\.tsv$")
+
+    fga_list[[sample_name]] <- FacetCalculateFGA(cnv_file = cnv_file)
+}
+
+## Save data to a tibble
+fga_tbl <- NULL
+
+for (i in names(fga_list)) {
+    fga_tbl <- rbind(
+        fga_tbl,
+        tibble(
+            sample_id = i,
+            fga = fga_list[[i]][["fga"]],
+            altered_length = fga_list[[i]][["altered_length"]],
+            total_length = fga_list[[i]][["total_length"]]
+        )
+    )
+}
+clinical_info <- LoadClinicalInfo()
+
+SaveData(
+    fga_tbl |> filter(sample_id %in% clinical_info$Sample.ID),
+    filename = "wes_cnv_facet_fga",
+    dir = "data/processed"
+)
+
+## "==========================================================================="
+## Preprocess WES CNV FACETS CNV gene data  ----
+## "==========================================================================="
+## * bedtools annotated gene data
 cnv_facet_dir <- here("data/WES/CNV/cnv_facets")
 
 tsv_files <- dir_ls(cnv_facet_dir, glob = "*.annotated.tsv", recurse = TRUE)
@@ -205,6 +240,7 @@ unique(cnv_facet_gene_raw$Chromosome)
 unique(cnv_facet_gene_raw$SVTYPE)
 clinical_info <- LoadClinicalInfo()
 
+## Keep samples with somatic matched normal only, 147 samples
 cnv_facet_gene_tbl <- cnv_facet_gene_raw |> 
     filter(sample_id %in% clinical_info$Sample.ID) |>
     ## The not estimateable Lesser (minor) copy number segments were filtered out
@@ -224,7 +260,7 @@ cnv_facet_gene_tbl <- cnv_facet_gene_raw |>
         cn_minor = as.integer(round(LCN_EM)),
         total_cn = as.integer(round(TCN_EM))
     ) |> 
-    select(
+    dplyr::select(
         sample_id, Chromosome, Start_Position, End_Position,
         cn_major, cn_minor, total_cn, purity, ploidy, SVTYPE, 
         Chr, Start, End, Gene
@@ -256,7 +292,14 @@ cnv_facet_gene_tbl <- cnv_facet_gene_raw |>
     ## Keep only changed CNV events
     dplyr::filter(cn_status != "NEUTRAL") |> 
     clean_names() |> 
-    rename(symbol = gene)
+    rename(symbol = gene) |> 
+    mutate(
+        start = as.integer(start),
+        end = as.integer(end)
+    )
+
+## Add the cytoband data
+cnv_facet_gene_tbl <- MapGene2Cytoband(cnv_facet_gene_tbl)
 
 ## Save the combined CNV bedtools annotated gene data
 SaveData(
@@ -266,7 +309,7 @@ SaveData(
 )
 
 ## "==========================================================================="
-## Preprocess WES CNV FACETS segment data for GISTIC2 input ----
+## Prepare WES CNV FACETS segment data for GISTIC2 input ----
 ## "==========================================================================="
 ## Get the GISTIC2 input data
 gistic2_data <- cnv_facet_raw |> 
@@ -449,6 +492,47 @@ SaveData(
     dir = "data/processed",
     filename = "wes_pcgr_snv_indels_tbl"
 )
+
+## Calculate the TMB
+maf_tbl <- ConvertPCGRToMaftools(pcgr_tbl = pcgr_snv_indel_tbl)
+
+## Create a MAF object
+maf_obj <- read.maf(
+    maf = maf_tbl, 
+    clinicalData = LoadClinicalInfo(is_somatic_matched = FALSE),
+    # cnTable = cnv_data,
+    verbose = TRUE
+)
+
+tcgaCompare(
+    maf = maf_obj,
+    cohortName = "FS-DFSP",
+    logscale = TRUE, 
+    capture_size = capture_size
+)
+
+tmb_data <- tmb(
+    maf_obj, 
+    captureSize = 34, 
+    logScale = TRUE, 
+    plotType = "classic", 
+    verbose = TRUE
+)
+
+message(
+    paste(
+        "Median TMB = ", 
+        round(median(tmb_data$total_perMB, na.rm = TRUE), 2)
+    )
+)
+
+SaveData(
+    tmb_data, 
+    dir = "data/processed", 
+    filename = "wes_pcgr_tmb_data"
+)
+
+
 
 ## "==========================================================================="
 ## Preprocess PCGR CNV data --------------
@@ -827,26 +911,6 @@ for (i in names(pyclone_data)) {
     
 }
 
-
-
-# ## Convert the PCGR data to a MAF format
-# maf_tbl <- ConvertPCGRToMaftools(pcgr_tbl = snv_indel_filtered)
-
-# ## Create a MAF object
-# maf_obj <- read.maf(
-#     maf = maf_tbl, 
-#     clinicalData = clinical_info,
-#     # cnTable = cnv_data,
-#     verbose = TRUE
-# )
-# maf_obj@variant.classification.summary
-# # oncoplot(maf = maf_obj, top = 20)
-
-# SaveData(
-#     maf_obj, 
-#     dir = "data/processed", 
-#     filename = "wes_pcgr_DFSP_cohort_merged_snv_indels_obj"
-# )
 
 rna_mat <- "data/RNA/merged.featureCounts.clean.txt"
 rna_mat <- read_tsv(rna_mat, show_col_types = FALSE)

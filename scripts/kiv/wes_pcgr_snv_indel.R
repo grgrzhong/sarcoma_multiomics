@@ -45,8 +45,8 @@ unique(pcgr_cna_data$variant_class)
 
 sample_groups <- LoadSampleGroupInfo()[1:11]
 
-cytoband_stats <- pcgr_cna_data %>%
-    group_by(cytoband, variant_class) %>%
+cytoband_stats <- pcgr_cna_data |>
+    group_by(cytoband, variant_class) |>
     summarise(
         n_samples = n_distinct(sample_id),
         n_genes = n_distinct(symbol),
@@ -55,14 +55,14 @@ cytoband_stats <- pcgr_cna_data %>%
         avg_segment_size = mean(segment_length_mb, na.rm = TRUE),
         median_segment_size = median(segment_length_mb, na.rm = TRUE),
         .groups = "drop"
-    ) %>%
+    ) |>
     arrange(desc(frequency))
 
 ## Statistical significance testing using binomial test
 ## Assume background alteration rate based on genome-wide analysis
 background_rate_gain <- 0.05  # 5% background for gains
 background_rate_loss <- 0.03  # 3% background for losses
-cytoband_stats <- cytoband_stats %>%
+cytoband_stats <- cytoband_stats |>
     mutate(
         background_rate = case_when(
             variant_class == "gain" ~ background_rate_gain,
@@ -79,12 +79,12 @@ cytoband_stats <- cytoband_stats %>%
     )
 
 ## 3. Filter for significant cytobands
-significant_cytobands <- cytoband_stats %>%
+significant_cytobands <- cytoband_stats |>
     filter(
         q_value < 0.05,           # FDR < 5%
         frequency >= 0.10,        # At least 10% frequency
         n_samples >= 5            # At least 5 samples
-    ) %>%
+    ) |>
     arrange(q_value, desc(frequency))
 
 print("Significantly altered cytobands:")
@@ -97,8 +97,8 @@ pcgr_cna_data <- pcgr_cna_data |>
     filter(sample_id %in% paired_samples)
 
 # Most frequently altered genes
-gene_freq <- pcgr_cna_data %>%
-    count(symbol, variant_class) %>%
+gene_freq <- pcgr_cna_data |>
+    count(symbol, variant_class) |>
     arrange(desc(n)) |> 
     filter(n >= 20)
 
@@ -106,9 +106,9 @@ head(gene_freq, 20)
 unique(gene_freq$EVENT_TYPE)
 
 # top amplified genes
-gene_freq %>%
-    filter(EVENT_TYPE == "gain") %>%
-    top_n(20, n) %>%
+gene_freq |>
+    filter(EVENT_TYPE == "gain") |>
+    top_n(20, n) |>
     ggplot(aes(x = reorder(SYMBOL, n), y = n)) +
     geom_col() +
     coord_flip() +

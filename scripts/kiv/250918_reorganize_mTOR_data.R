@@ -13,7 +13,7 @@ all_files <- dir_ls(
     raw_dir,
     recurse = TRUE,
     type = "file"
-) %>%
+) |>
     str_subset("\\.zip$", negate = TRUE)
 
 # Extract SFT case numbers from filenames and format with hyphen
@@ -28,14 +28,14 @@ file_df <- tibble(
     filepath = all_files,
     filename = basename(all_files),
     sft_case = map_chr(all_files, extract_sft_case)
-) %>%
+) |>
     filter(!is.na(sft_case)) |>
     arrange(sft_case)
 
 # Get unique SFT cases
-unique_cases <- file_df %>%
-    pull(sft_case) %>%
-    unique() %>%
+unique_cases <- file_df |>
+    pull(sft_case) |>
+    unique() |>
     sort()
 
 cat("Found", length(unique_cases), "unique SFT cases:\n")

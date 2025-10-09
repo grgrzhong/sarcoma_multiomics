@@ -130,7 +130,7 @@ ggsave(
 #     format = "html",
 #     caption = "Mutect2 Performance Metrics Across Different Depths",
 #     digits = 4
-# ) %>%
+# ) |>
 #     kableExtra::kable_styling(
 #         bootstrap_options = c("striped", "hover", "condensed"),
 #         full_width = FALSE

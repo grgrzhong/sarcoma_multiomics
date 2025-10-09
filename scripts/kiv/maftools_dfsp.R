@@ -11,9 +11,9 @@ sample.fst <- dfsp.clin$Tumor_Sample_Barcode[dfsp.clin$Histology.Subtype=="FST"]
 sample.met <- dfsp.clin$Tumor_Sample_Barcode[dfsp.clin$Origin=="Metastasis"]
 
 
-dfsp.maf.filtered <- dfsp.maf %>% separate(AD, into = c("RAD", "VAD"), sep = ",", remove = TRUE)
+dfsp.maf.filtered <- dfsp.maf |> separate(AD, into = c("RAD", "VAD"), sep = ",", remove = TRUE)
 
-dfsp.maf.filtered <- dfsp.maf.filtered %>% filter(ExonicFunc.refGene!= "synonymous SNV" & 
+dfsp.maf.filtered <- dfsp.maf.filtered |> filter(ExonicFunc.refGene!= "synonymous SNV" & 
                                                     Func.refGene %in% c("exonic", "splicing") &
                                                     AF>=0.05 & VAD >=5  & 
                                                     DP >=10 & gnomAD_exome_ALL <0.001)
@@ -52,7 +52,7 @@ scores.gis <- "D:/Sarcoma/Methylation_profiling/DFSP/CNV/scores.gistic"
 SampleSheet_DFSP <- read.csv("D:/Sarcoma/Methylation_profiling/DFSP/phenoData_DFSP_97pt_Meth_immune_CNV.csv", row.names = 1)
 
 SampleSheet_DFSP <- read.csv("D:/Sarcoma/Methylation_profiling/DFSP/phenoData_DFSP_all.csv")
-SampleSheet_DFSP <- SampleSheet_DFSP %>% filter(Main == "Yes",
+SampleSheet_DFSP <- SampleSheet_DFSP |> filter(Main == "Yes",
                                                 !(Specimen.Nature %in% c("Metastasis", "Recurrence (Post-imatinib)")),
                                                 Specimen.Class == "Tumour"
                                                 )

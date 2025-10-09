@@ -115,8 +115,8 @@ get_summary_stats <- function(var_name, data, outcome) {
   range_df <- do.call(data.frame, range_df)
   
   # Merge the data frames
-  merged_df <- median_df %>%
-    left_join(mean_df, by = outcome) %>%
+  merged_df <- median_df |>
+    left_join(mean_df, by = outcome) |>
     left_join(range_df, by = outcome)
   
   return(merged_df)
@@ -300,7 +300,7 @@ print(p_values)
 library(survival)
 cox_ph_model <- coxph(Surv(time_to_event, event_status) ~ x1_continuous + x2_categorical, data = your_data)
 
-DFSP_mol_confirmed_FST <- DFSP_mol_confirmed %>% filter (FST == "Yes")
+DFSP_mol_confirmed_FST <- DFSP_mol_confirmed |> filter (FST == "Yes")
 
 # Convert survival months into numeric variables
 DFSP$OS.time <- as.numeric(DFSP$OS.time)

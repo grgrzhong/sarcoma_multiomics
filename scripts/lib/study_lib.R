@@ -6336,6 +6336,13 @@ VerticalCombinedOncoplot <- function(
     cnv_gene_mat,
     cnv_cytoband_mat,
     is_somatic_matched = TRUE,
+    snv_indel_row_sort = TRUE,
+    snv_indel_row_anno = NULL,
+    snv_indel_top_anno = NULL,
+    top_annotation = NULL,
+    cnv_gene_sort = TRUE,
+    cnv_cytoband_sort = TRUE,
+    pct_side = "right",
     main_type = "cytoband",
     sample_annotation = c("FST.Group", "Metastasis", "Specimen.Nature"),
     column_title = NULL,
@@ -6363,7 +6370,7 @@ VerticalCombinedOncoplot <- function(
     }
 
     ## "===================================================================="
-    ## Column sample annotation colors -----
+    ## Bottom column sample annotation colors -----
     ## "===================================================================="
     sample_annotation_colors <- list()
 
@@ -6565,11 +6572,164 @@ VerticalCombinedOncoplot <- function(
     }
 
     ## "===================================================================="
+    ## Determine the side for row names -----
+    ## "===================================================================="
+    if (pct_side == "right") {
+        row_names_side <- "left"
+    } else {
+        row_names_side <- "right"
+    }
+    
+    ## "===================================================================="
     ## SNV/indel oncoplot -----
     ## "===================================================================="
     ## snv indel oncoplot
-    snv_indel_row_freq <- rowSums(snv_indel_mat !="")
-    snv_indel_row_order <- order(snv_indel_row_freq, decreasing = TRUE)
+    if (snv_indel_row_sort) {
+        
+        snv_indel_row_freq <- rowSums(snv_indel_mat !="")
+        snv_indel_row_order <- order(snv_indel_row_freq, decreasing = TRUE)
+
+    } else {
+        snv_indel_row_order <- rownames(snv_indel_mat)
+    }
+
+    ## Add row annotation
+    row_annotation_colors <- NULL
+    if (!is.null(snv_indel_row_anno)) {
+        # Define colors for pathway annotation
+        pathway_colors <- c(
+            "Genome Maintenance" = "#E31A1C",
+            "Oncogenes/TSG" = "#1F78B4",
+            "Cell Cycle" = "#33A02C",
+            "Transcription" = "#FF7F00",
+            "Epigenetic" = "#6A3D9A",
+            "Cell Adhesion/Migration" = "#FB9A99",
+            "Signal Transduction" = "#A6CEE3",
+            "Other/Unknown" = "#CCCCCC"
+        )
+
+        row_annotation_colors <- list(
+            Pathway = pathway_colors
+        )
+    }
+
+    if (!is.null(snv_indel_row_anno)) {
+
+        left_annotation <- rowAnnotation(
+            df = snv_indel_row_anno,
+            col = row_annotation_colors,
+            annotation_width = unit(2, "mm"),
+            annotation_name_gp = gpar(fontsize = text_size),
+            annotation_legend_param = list(
+                labels_gp = gpar(fontsize = text_size),       # Legend text
+                title_gp = gpar(fontsize = title_size)         # Legend title
+            ),
+            show_annotation_name = FALSE
+        )
+
+    } else {
+
+        left_annotation <- NULL
+    }
+
+    ## Add top annotation
+    if (!is.null(snv_indel_top_anno)) {
+        ## Multiple barplot
+            anno_list <- list()
+            
+            for (anno_name in names(snv_indel_top_anno)) {
+                
+                anno_data <- snv_indel_top_anno[[anno_name]]
+
+                if (is.data.frame(anno_data)) {
+                    numeric_cols <- sapply(anno_data, is.numeric)
+                    if (any(numeric_cols)) {
+                        plot_data <- anno_data[[which(numeric_cols)[1]]]
+                    } else {
+                        warning(paste("No numeric columns found in", anno_name))
+                        next
+                    }
+                } else {
+                    ## Vector
+                    plot_data <- anno_data
+                }
+
+                ## tick breaks
+                data_range <- range(plot_data, na.rm = TRUE)
+                data_max <- data_range[2]
+                data_min <- data_range[1]
+
+                # Create intelligent tick breaks
+                if (data_max <= 1) {
+                    # For very small values, use finer steps
+                    tick_breaks <- pretty(c(data_min, data_max), n = 4)
+
+                } else if (data_max <= 5) {
+                    # For small values, use integers
+                    tick_breaks <- pretty(c(data_min, data_max), n = 3)
+                } else if (data_max <= 50) {
+                    # For medium values, use steps of 5 or 10
+                    tick_breaks <- pretty(c(data_min, data_max), n = 4)
+                } else {
+                    # For large values, use larger steps
+                    tick_breaks <- pretty(c(data_min, data_max), n = 3)
+                }
+                
+                # Ensure we include 0 and max
+                tick_breaks <- unique(c(0, tick_breaks[tick_breaks > 0]))
+                tick_breaks <- tick_breaks[tick_breaks <= data_max]
+                
+                # Format labels appropriately
+                tick_labels <- ifelse(
+                    tick_breaks == floor(tick_breaks), 
+                    as.character(as.integer(tick_breaks)),
+                    sprintf("%.1f", tick_breaks)
+                )
+                
+                anno_list[[anno_name]] <- anno_barplot(
+                    plot_data,
+                    height = unit(2, "cm"),
+                    axis_param = list(
+                        at = tick_breaks,
+                        labels = tick_labels,
+                        gp = gpar(fontsize = text_size)
+                    ),
+                    gp = gpar(fill = "gray50")
+                )
+
+            }
+
+            ## Combine multiple annotations
+            if (length(anno_list) > 0) {
+                # Use do.call instead of !!!
+                top_annotation <- do.call(HeatmapAnnotation, c(
+                    anno_list,
+                    list(
+                        annotation_name_gp = gpar(fontsize = text_size),
+                        annotation_name_side = "left",
+                        gap = unit(2, "mm")
+                    )
+                    
+                ))
+            } else {
+                # Fallback if no valid annotations were created
+                top_annotation <- HeatmapAnnotation(cbar = anno_oncoprint_barplot())
+            }
+            # top_annotation <- HeatmapAnnotation(
+            #     "TMB/mb" = anno_barplot(
+            #         snv_indel_top_anno,
+            #         height = unit(4, "cm"),
+            #         axis_param = list(
+            #             at = c(0, max(snv_indel_top_anno)),
+            #             labels = c(0, max(snv_indel_top_anno))
+            #         )
+            #     )
+            # )
+
+    } else {
+        
+        top_annotation = HeatmapAnnotation(cbar = anno_oncoprint_barplot())
+    }
 
     ht_snv_indel <- oncoPrint(
         snv_indel_mat,
@@ -6577,7 +6737,10 @@ VerticalCombinedOncoplot <- function(
         col = alteration_colors,
         column_title = column_title,
         bottom_annotation = NULL,
+        top_annotation = top_annotation,
+        left_annotation = left_annotation,
         show_row_names = TRUE,
+        row_names_side = row_names_side,
         row_order  = snv_indel_row_order,
         row_names_gp = gpar(fontsize = text_size),
         show_column_names = FALSE,
@@ -6587,14 +6750,18 @@ VerticalCombinedOncoplot <- function(
         show_pct = TRUE,
         pct_gp = gpar(fontsize = text_size),
         pct_digits = 0,
-        pct_side = "left",
+        pct_side = pct_side,
     )
 
     ## "===================================================================="
     ## CNV gene oncoplot -----
     ## "===================================================================="
-    cnv_gene_row_freq <- rowSums(cnv_gene_mat !="")
-    cnv_gene_row_order <- order(cnv_gene_row_freq, decreasing = TRUE)
+    if (cnv_gene_sort) {
+        cnv_gene_row_freq <- rowSums(cnv_gene_mat !="")
+        cnv_gene_row_order <- order(cnv_gene_row_freq, decreasing = TRUE)
+    } else {
+        cnv_gene_row_order <- rownames(cnv_gene_mat)
+    }
 
     ht_cnv_gene <- oncoPrint(
         cnv_gene_mat,
@@ -6603,6 +6770,7 @@ VerticalCombinedOncoplot <- function(
         top_annotation = NULL,
         bottom_annotation = NULL,
         show_row_names = TRUE,
+        row_names_side = row_names_side,
         row_order = cnv_gene_row_order,
         row_names_gp = gpar(fontsize = text_size),
         show_column_names = FALSE,
@@ -6612,7 +6780,7 @@ VerticalCombinedOncoplot <- function(
         show_pct = TRUE,
         pct_gp = gpar(fontsize = text_size),        
         pct_digits = 0,
-        pct_side = "left"
+        pct_side = pct_side
     )
 
     ## "===================================================================="
@@ -6648,6 +6816,7 @@ VerticalCombinedOncoplot <- function(
         bottom_annotation = bottom_annotation,
         top_annotation = NULL,
         show_row_names = TRUE,
+        row_names_side = row_names_side,
         row_order = cnv_cytoband_row_order,
         row_names_gp = gpar(fontsize = text_size),
         show_column_names = TRUE,
@@ -6657,7 +6826,7 @@ VerticalCombinedOncoplot <- function(
         show_pct = TRUE,
         pct_gp = gpar(fontsize = text_size),        
         pct_digits = 0,
-        pct_side = "left"
+        pct_side = pct_side
     )
 
     ## "===================================================================="
@@ -8342,7 +8511,7 @@ LoadCBioPortalSarcomaData <- function(
     )
 }
 
-LoadDFSPStudyData <- function() {
+LoadPublicDFSPStudyData <- function() {
     
     ## There are two major DFSP study
     ## peng_2022 (https://doi.org/10.1111/bjd.20976)
@@ -8930,4 +9099,185 @@ GetPycloneInputData <- function(
     names(data_list) <- all_sample_ids
 
     data_list
+}
+
+LoadCOSMICGeneList <- function() {
+    cosmic_file <- "data/public/Census_allThu Oct 2 09_53_09 2025.csv"
+    read_csv(
+        here(cosmic_file),
+        show_col_types = FALSE
+    ) |> 
+    pull(`Gene Symbol`)
+}
+
+# MapGene2Cytoband <- function(data) {
+
+#     # ensembl <- useEnsembl(
+#     #     biomart = "ensembl",
+#     #     dataset = "hsapiens_gene_ensembl",
+#     #     mirror = "useast"
+#     # )
+#     ensembl <- useMart(
+#         biomart = "ENSEMBL_MART_ENSEMBL", 
+#         dataset = "hsapiens_gene_ensembl"
+#     )
+#     ## get the gene annotation with cytoband  from biomart
+#     anno_gene <- getBM(
+#         attributes = c(
+#             "ensembl_gene_id", 
+#             "external_gene_name", 
+#             "chromosome_name", 
+#             "start_position", 
+#             "end_position", 
+#             "band", 
+#             "gene_biotype"
+#         ), 
+#         mart = ensembl
+#     )
+
+#     anno_gene <- anno_gene |> 
+#         mutate(
+#             cytoband = paste0(chromosome_name, band)
+#         )
+#     # anno_gene[1:5, ]
+
+#     ## Map the gene to cytoband
+#     data |> 
+#         left_join(
+#             anno_gene |> 
+#                 dplyr::select(
+#                     symbol = external_gene_name, cytoband
+#                 ) |>
+#                 distinct(symbol, .keep_all = TRUE),
+#             by = "symbol"
+#         )
+# }
+
+MapGene2Cytoband <- function(data) {
+
+    ## Load the cytoband data
+    cytoband_file <- "data/public/cytoband_hg38.txt"
+    cytoband_data <- read_tsv(
+        here(cytoband_file),
+        col_names = c(
+            "chromosome", "start", "end", "cytoband", "gie_stain"
+        ),
+        skip = 1,
+        show_col_types = FALSE
+    )
+    ## Create GRanges object
+    gene_gr <- GRanges(
+        seqnames = data$chr,
+        ranges = IRanges(
+            start = data$start,
+            end = data$end
+        )
+    )
+
+    cytoband_gr <- GRanges(
+        seqnames = cytoband_data$chromosome,
+        ranges = IRanges(
+            start = cytoband_data$start,
+            end = cytoband_data$end
+        ),
+        cytoband = cytoband_data$cytoband
+    )
+
+    ## Find the overlaps
+    overlaps <- findOverlaps(gene_gr, cytoband_gr)
+
+    ## Create the mapping
+    cytoband_mapping <- data |> 
+        mutate(row_id = row_number()) |>
+        left_join(
+            tibble(
+                row_id = queryHits(overlaps),
+                cytoband_raw = cytoband_gr$cytoband[subjectHits(overlaps)],
+                chrom = as.character(
+                    seqnames(cytoband_gr)[subjectHits(overlaps)]
+                )
+            ) |> 
+            mutate(
+                cytoband = paste0(str_remove(chrom, "^chr"), cytoband_raw)
+            ) |> 
+            group_by(row_id) |>
+            summarise(
+                cytoband = paste(cytoband, collapse = ";"),
+                .groups = "drop"
+            ),
+            by = "row_id"
+        ) |> 
+        select(-row_id) |> 
+        mutate(
+            cytoband = if_else(
+                is.na(cytoband), NA_character_, cytoband
+            )
+        )
+}
+
+FacetCalculateFGA <- function(cnv_file, gain_threshold = 0.3, loss_threshold = -0.3) {    
+
+    # Read the CNV data
+    df <- read_tsv(cnv_file, show_col_types = FALSE)
+
+    # Calculate segment lengths
+    df <- df |>
+        mutate(
+            segment_length = END - POS + 1,
+            # Calculate log2 copy number relative to diploid
+            # CNLR_MEDIAN is already log2 ratio, but we need to adjust for diploid baseline
+            log2_cn = CNLR_MEDIAN - dipLogR
+
+        )
+
+    # Total genome length analyzed
+    total_genome_length <- sum(df$segment_length)
+
+    # Altered segments (non-neutral)
+    altered_segments <- df |>
+        # filter(SVTYPE != "NEUTR")
+        filter(
+            !is.na(log2_cn) & 
+            (log2_cn > gain_threshold | log2_cn < loss_threshold)
+        )
+
+    altered_length <- sum(altered_segments$segment_length)
+
+    # Calculate FGA
+    fga <- altered_length / total_genome_length
+
+    # Print results
+    cat("=== FGA Analysis Results ===\n")
+    cat(sprintf("Total genome length analyzed: %s bp\n", format(total_genome_length, big.mark = ",")))
+    cat(sprintf("Altered genome length: %s bp\n", format(altered_length, big.mark = ",")))
+    cat(sprintf("FGA: %.4f (%.2f%%)\n\n", fga, fga * 100))
+
+    # Breakdown by alteration type
+    gain_segments <- df %>%
+        filter(!is.na(log2_cn) & log2_cn > gain_threshold)
+    loss_segments <- df %>%
+        filter(!is.na(log2_cn) & log2_cn < loss_threshold)
+
+    gain_length <- sum(gain_segments$segment_length)
+    loss_length <- sum(loss_segments$segment_length)
+
+    cat(sprintf("=== FGA Analysis (Log2 Thresholds) ===\n"))
+    cat(sprintf("Gain threshold: > %.1f\n", gain_threshold))
+    cat(sprintf("Loss threshold: < %.1f\n", loss_threshold))
+    cat(sprintf("Total genome length profiled: %s bp\n", format(total_genome_length, big.mark = ",")))
+    cat(sprintf("Altered genome length: %s bp\n", format(altered_length, big.mark = ",")))
+    cat(sprintf("  - Gains: %s bp (%.2f%%)\n", format(gain_length, big.mark = ","), (gain_length / total_genome_length) * 100))
+    cat(sprintf("  - Losses: %s bp (%.2f%%)\n", format(loss_length, big.mark = ","), (loss_length / total_genome_length) * 100))
+    cat(sprintf("FGA: %.4f (%.2f%%)\n", fga, fga * 100))
+
+    return(list(
+        fga = fga,
+        total_length = total_genome_length,
+        altered_length = altered_length,
+        gain_length = gain_length,
+        loss_length = loss_length,
+        altered_segments = altered_segments,
+        gain_segments = gain_segments,
+        loss_segments = loss_segments
+    ))
 }

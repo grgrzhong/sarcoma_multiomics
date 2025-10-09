@@ -320,7 +320,7 @@ sarcoma_data <- LoadCBioPortalSarcomaData(
 )
 
 ## Other public DFSP studies
-DFSP_study_data <- LoadDFSPStudyData()
+DFSP_study_data <- LoadPublicDFSPStudyData()
 
 ## Our study
 snv_indel_freq |> 
@@ -632,6 +632,12 @@ SaveData(
     dir = "data/processed", 
     filename = "wes_pcgr_tmb_data"
 )
+
+# tmb_data <- LoadData(
+#     dir = "data/processed", 
+#     filename = "wes_pcgr_tmb_data"
+# )
+
 
 ## "==========================================================================="
 ## Compare TMB (Epic meth groups) ----
@@ -977,7 +983,7 @@ sarcoma_data <- LoadCBioPortalSarcomaData(
 )
 
 ## Other public DFSP studies
-DFSP_study_data <- LoadDFSPStudyData()
+DFSP_study_data <- LoadPublicDFSPStudyData()
 
 ## Our study
 snv_indel_freq |> 

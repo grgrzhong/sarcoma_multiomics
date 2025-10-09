@@ -100,10 +100,10 @@ print(significant_genes$gene)
 library(ggplot2)
 
 # Create summary data for plotting
-summary_data <- all_data %>%
-  group_by(gene, clonality) %>%
-  summarise(count = n(), .groups = "drop") %>%
-  group_by(gene) %>%
+summary_data <- all_data |>
+  group_by(gene, clonality) |>
+  summarise(count = n(), .groups = "drop") |>
+  group_by(gene) |>
   mutate(proportion = count / sum(count))
 
 # Plot clonal vs subclonal proportions
