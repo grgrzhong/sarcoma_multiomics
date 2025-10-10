@@ -301,6 +301,9 @@ cnv_facet_gene_tbl <- cnv_facet_gene_raw |>
 ## Add the cytoband data
 cnv_facet_gene_tbl <- MapGene2Cytoband(cnv_facet_gene_tbl)
 
+cnv_facet_gene_tbl |> 
+    filter(symbol == c("SPRY4", "KITLG"))
+
 ## Save the combined CNV bedtools annotated gene data
 SaveData(
     cnv_facet_gene_tbl,
@@ -910,7 +913,6 @@ for (i in names(pyclone_data)) {
     )
     
 }
-
 
 rna_mat <- "data/RNA/merged.featureCounts.clean.txt"
 rna_mat <- read_tsv(rna_mat, show_col_types = FALSE)
