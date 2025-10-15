@@ -55,6 +55,16 @@ study_colors <- list(
             Meth2 = "#ff7f0e"
         )
     ),
+    Molecular.subtype = c(
+        "PDGFB" = "white",
+        "PDGFD" = "darkgray"
+    ),
+    Histology.subtype = c(
+        "Classic" = "#8FA3B0",
+        "FS" = "#C4A5C7",
+        "Pigmented" = "#D4B896",
+        "Myxoid" = "#B89B9B"
+    ),
     HRD.cat = c(
         "High" = "#FFB6C1",
         "Low" = "darkgray"

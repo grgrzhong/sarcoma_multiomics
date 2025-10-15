@@ -17,6 +17,8 @@ source(here::here("conf/study_conf.R"))
 ## "==========================================================================="
 ## Load data -----
 ## "==========================================================================="
+clinical_info <- LoadClinicalInfo()
+
 stat_res_list <- LoadData(
     dir = "data/processed",
     filename = "wes_snv_indels_cnv_stat_res"
@@ -36,6 +38,46 @@ cnv_facet_gene_tbl <- LoadData(
     dir = "data/processed",
     filename = "cnv_facet_gene_tbl"
 )
+
+gistic_data <- LoadData(
+    dir = "data/processed",
+    filename = "wes_cnv_facets_gistic2_somatic_matched_all_tumors_qval0.5"
+)
+
+tmb_data <- LoadData(
+    dir = "data/processed", 
+    filename = "wes_pcgr_tmb_data"
+)
+
+tmb_data <- tibble(sample_id = clinical_info$Sample.ID) |> 
+    left_join(
+        tmb_data,
+        by = c("sample_id" = "Tumor_Sample_Barcode")
+    ) |>
+    dplyr::select(sample_id, total_perMB) |> 
+    mutate(
+        total_perMB = if_else(is.na(total_perMB), 0, total_perMB)
+    ) |>
+    # column_to_rownames("sample_id")
+    pull(total_perMB, name = sample_id)
+
+msi_data <- clinical_info |> 
+    select(Sample.ID, MSIsensor.Score) |> 
+    # column_to_rownames(var = "Sample.ID") |> 
+    pull(`MSIsensor.Score`, name = Sample.ID)
+
+fga_data <- LoadData(
+    dir = "data/processed",
+    filename = "wes_cnv_facet_fga"
+) |>
+    dplyr::select(sample_id, fga) |>
+    # column_to_rownames(var = "sample_id") |> 
+    pull(fga, name = sample_id)
+
+hrd_data <- clinical_info |> 
+    select(Sample.ID, HRDscore) |> 
+    # column_to_rownames(var = "Sample.ID") |> 
+    pull(HRDscore, name = Sample.ID)
 
 cnv_facet_gene_tbl |> 
     select(cytoband, cn_status) |> 
@@ -286,37 +328,6 @@ snv_indel_row_anno <- pathway_gene_groups_tbl |>
         column_to_rownames("genes")
 
 ## Barplots: TMB
-tmb_data <- LoadData(
-    dir = "data/processed", 
-    filename = "wes_pcgr_tmb_data"
-)
-
-tmb_data <- tibble(sample_id = clinical_info$Sample.ID) |> 
-    left_join(
-        tmb_data,
-        by = c("sample_id" = "Tumor_Sample_Barcode")
-    ) |>
-    dplyr::select(sample_id, total_perMB) |> 
-    mutate(
-        total_perMB = if_else(is.na(total_perMB), 0, total_perMB)
-    ) |>
-    column_to_rownames("sample_id")
-
-msi_data <- clinical_info |> 
-    select(Sample.ID, MSIsensor.Score) |> 
-    column_to_rownames(var = "Sample.ID")
-
-fga_data <- LoadData(
-    dir = "data/processed",
-    filename = "wes_cnv_facet_fga"
-) |>
-    dplyr::select(sample_id, fga) |>
-    column_to_rownames(var = "sample_id")
-
-hrd_data <- clinical_info |> 
-    select(Sample.ID, HRDscore) |> 
-    column_to_rownames(var = "Sample.ID")
-
 VerticalCombinedOncoplot(
     snv_indel_mat = snv_indel_mat,
     cnv_gene_mat = cnv_gene_mat,
@@ -344,7 +355,7 @@ VerticalCombinedOncoplot(
 ## "==========================================================================="
 ## Figure2 -----
 ## "==========================================================================="
-### Plot parameters -----
+## Plot parameters
 title_size <- 7
 text_size <- 6
 column_title <- NULL
@@ -357,9 +368,7 @@ sample_ids <- clinical_info |>
     # filter(Sample.ID %in% colnames(cnv_cytoband_mat)) |>
     pull(Sample.ID)
 
-### "========================================================================"
-### CNV gene matrix ----
-### "========================================================================"
+## CNV gene matrix
 show_cnv_genes <- c(
     "KITLG",
     "SPRY4",
@@ -388,10 +397,8 @@ cnv_gene_mat <- GetVariantMat(
 
 cnv_gene_mat <- cnv_gene_mat[, sample_ids, drop = FALSE]
 
-### "========================================================================"
-### CNV cytoband matrix ----
-### "========================================================================"
-## For same cytoband, we showly one alteration type with higher frequency
+## CNV cytoband matrix
+## For same cytoband, we show only one alteration type with higher frequency
 gistic_cn_cytoband_mat <- gistic_data$cn_cytoband_mat
 gistic_cn_cytoband_mat[gistic_cn_cytoband_mat == "Amp"] <- "AMP"
 gistic_cn_cytoband_mat[gistic_cn_cytoband_mat == "Del"] <- "DEL"
@@ -420,9 +427,7 @@ cnv_cytoband_mat <- gistic_cn_cytoband_mat[
     show_cytobands, sample_ids, drop = FALSE
 ]
 
-### "========================================================================"
-### Top annotation ----
-### "========================================================================"
+## Top annotation
 top_annotation_list <- list(
     "TMB" = tmb_data[sample_ids, , drop = FALSE],
     "FGA" = fga_data[sample_ids, , drop = FALSE]
@@ -539,9 +544,7 @@ bottom_annotation <- HeatmapAnnotation(
     show_annotation_name = TRUE
 )
 
-### "========================================================================"
-### Alteration colors ----
-### "========================================================================"
+## Alteration colors
 alteration_colors <- study_colors$Alteration
 
 alter_fun <- list(
@@ -564,6 +567,7 @@ alter_fun <- list(
     )
 )
 
+## Legends
 alteration_legend <- Legend(
     labels = names(alter_fun)[-1],
 
@@ -639,6 +643,7 @@ alteration_legend <- Legend(
     grid_width = unit(4, "mm"),
     direction = "vertical"
 )
+
 ### "========================================================================"
 ### CNV gene oncoprint ----
 ### "========================================================================"
@@ -749,6 +754,480 @@ for (img in img_type) {
 ## "==========================================================================="
 ## Figure3 -----
 ## "==========================================================================="
+## Plot parameters
+title_size <- 9
+text_size <- 7
+row_names_side <- "left"
+pct_side <- "right"
+show_annotation_name <- TRUE
+show_row_names <- TRUE
+show_heatmap_legend <- TRUE
+
+sort_group_level <- c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP")
+main_group <- sort_group_level[[4]]
+main_ht_idx <- which(sort_group_level == main_group)
+
+## CNV gene matrix
+show_cnv_genes <- c(
+    "KITLG",
+    "SPRY4",
+    "JS-2",
+    "TERT",
+    "CLPTM1L",
+    "PRDM1",
+    "AIM1",
+    "FOXO3",
+    "HACE1",
+    
+    "CDKN2A",
+    "CDKN2B",
+    "MTAP",
+    "NOTCH2",
+    "PAX7"
+)
+
+## Some same segments could be have multiple different events
+## We choose the prominent one
+cnv_gene_mat <- GetVariantMat(
+    data = cnv_facet_gene_tbl |> 
+        filter(symbol %in% show_cnv_genes) |>
+        mutate(
+            cn_status = case_when(
+                cn_status %in% c("AMP", "GAIN") ~ "AMP",
+                cn_status %in% c("HOMDEL", "DEL") ~ "DEL",
+                TRUE ~ cn_status
+            )
+        ) |> 
+        mutate(cytoband_symbol = paste(cytoband, symbol, sep = "_")),
+    variant_type = "cytoband_symbol",
+    variant_class = "cn_status"
+)
+
+## CNV cytoband matrix
+gistic_cn_cytoband_mat <- gistic_data$cn_cytoband_mat
+gistic_cn_cytoband_mat[gistic_cn_cytoband_mat == "Amp"] <- "AMP"
+gistic_cn_cytoband_mat[gistic_cn_cytoband_mat == "Del"] <- "DEL"
+
+cnv_cytobands <- list_rbind(stat_res_sig$gistic_cnv_cytoband) |> 
+    distinct() |> 
+    pull(cytoband)
+
+cnv_cytoband_mat <- gistic_cn_cytoband_mat[
+    cnv_cytobands, 
+    colnames(cnv_gene_mat), 
+    drop = FALSE
+]
+
+cnv_gene_row_order <- rownames(cnv_gene_mat)
+cnv_cytoband_row_order <- rownames(cnv_cytoband_mat)
+
+ht_mat <- rbind(
+    cnv_gene_mat,
+    cnv_cytoband_mat
+)
+
+row_order <- rownames(ht_mat)
+
+top_annotation <- list(
+    "TMB" = tmb_data,
+    "FGA" = fga_data
+)
+
+# DFSPFigure3ComplexGroupOncoplot(
+#     mat = cnv_gene_mat,
+#     split_by_group = "FST.Group",
+#     sort_group_level = c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP"),
+#     # sort_group_level = c("Classic", "FST"),
+#     main_group = main_group,
+#     sample_annotation = c("FST.Group", "Metastasis", "Specimen.Nature"),
+#     show_bottom_annotation = TRUE,
+#     show_top_annotation = TRUE,
+#     top_bar_annotation = top_annotation,
+#     show_column_names = FALSE,
+#     column_title = NULL,
+#     width = 18,
+#     height = 12,
+#     dir = "figures/251009_oncoplot",
+#     filename = paste0("test")
+# )
+
+## Row orders based main group
+row_cnv_gene_order <- GetDFSPGroupRowOrder(
+    main_group = main_group, 
+    mat = cnv_gene_mat
+)
+
+row_cnv_cytoband_order <- GetDFSPGroupRowOrder(
+    main_group = main_group, 
+    mat = cnv_cytoband_mat
+)
+
+row_order <- c(row_cnv_gene_order, row_cnv_cytoband_order)
+
+sample_annotation <- c(
+    "FST.Group", 
+    "Metastasis", 
+    "Specimen.Nature",
+    "Histology.subtype",
+    "Molecular.subtype"
+)
+
+top_annotation <- PrepareTopBarAnno(
+    top_annotation_list,
+    text_size = text_size,
+    title_size = title_size
+)
+
+## Alteration colors
+alteration_colors <- study_colors$Alteration
+
+alter_fun <- list(
+    background = alter_graphic("rect", fill = "#CCCCCC"),
+    AMP = alter_graphic(
+        "rect", width = 0.9, height = 0.9,
+        fill = study_colors$Alteration[["AMP"]]
+    ),
+    DEL = alter_graphic(
+        "rect", width = 0.9, height = 0.9,
+        fill = study_colors$Alteration[["DEL"]]
+    )
+)
+
+alteration_legend <- Legend(
+    
+    labels = names(alter_fun)[-1],
+
+    ## Custom graphics function to create rectangles with backgrounds and borders that match the heatmap
+    graphics = list(
+        # AMP - full size with background and border
+        function(x, y, w, h) {
+            # Background (grey)
+            grid.rect(
+                x, y, w, h,
+                gp = gpar(
+                    fill = "#CCCCCC", col = "white", lwd = 0.5
+                )
+            )
+            # Foreground rectangle
+            grid.rect(
+                x, y, w * 0.9, h * 0.9,
+                gp = gpar(
+                    fill = study_colors$Alteration[["AMP"]],
+                    col = "white", lwd = 0.5
+                )
+            )
+        },
+        # DEL - full size with background and border
+        function(x, y, w, h) {
+            grid.rect(
+                x, y, w, h,
+                gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+            )
+            grid.rect(
+                x, y, w * 0.9, h * 0.9,
+                gp = gpar(
+                    fill = study_colors$Alteration[["DEL"]],
+                    col = "white", lwd = 0.5
+                )
+            )
+        }
+    ),
+    title = "Alteration",
+    title_gp = gpar(fontsize = title_size), # fontface = "bold"
+    labels_gp = gpar(fontsize = text_size),
+    grid_height = unit(4, "mm"),
+    grid_width = unit(4, "mm"),
+    direction = "vertical"
+)
+
+## sample_annotation_colors
+sample_annotation_colors <- list()
+
+for (annotation in sample_annotation) {
+    sample_annotation_colors[[annotation]] <- study_colors[[annotation]]
+}
+
+## Sample annotation legends
+sample_annotation_legends <- list()
+
+for (annotation in sample_annotation) {
+
+    # Get unique values and colors for this annotation
+    annotation_values <- unique(clinical_info[[annotation]])
+    
+    # print(annotation_values)
+    annotation_values <- annotation_values[!is.na(annotation_values)]
+    annotation_colors <- sample_annotation_colors[[annotation]][annotation_values]
+    
+    # Skip if no valid colors found
+    if (length(annotation_colors) == 0) {
+        warning(paste("No valid colors found for annotation:", annotation))
+        next
+    }
+    
+    sample_annotation_legends[[annotation]] <- Legend(
+        labels = names(annotation_colors),
+        legend_gp = gpar(fill = annotation_colors),
+        title = annotation,
+        title_gp = gpar(fontsize = title_size),
+        labels_gp = gpar(fontsize = text_size),
+        grid_height = unit(4, "mm"),
+        grid_width = unit(4, "mm"),
+        direction = "vertical"
+    )
+} 
+
+## Prepare data for each group
+
+for (i in sort_group_level) {
+
+    # ## Only show for bottom matrix
+    # show_column_names <- (j == n_mat_types)
+
+    ## Get the i matched idx
+    group_idx <- which(sort_group_level == i)
+    n_group <- length(sort_group_level)
+
+    # ## Only for bottom-right
+    show_annotation_name <- (group_idx == n_group)
+
+    ## Group matched matrix
+    sample_ids <- clinical_info |>
+        filter(!!sym("FST.Group") == i) |>
+        pull(Sample.ID)
+
+    cur_cnv_gene_mat <- cnv_gene_mat[, sample_ids, drop = FALSE]
+    cur_cnv_cytoband_mat <- cnv_cytoband_mat[, sample_ids, drop = FALSE]
+
+    ## Group matched sample annotation
+    sample_idx <- match(sample_ids, clinical_info$Sample.ID)
+    cur_sample_annotation <- clinical_info[sample_idx, ] |>
+        select(Sample.ID, all_of(sample_annotation)) |>
+        column_to_rownames(var = "Sample.ID")
+
+    bottom_annotation <- HeatmapAnnotation(
+        df = cur_sample_annotation,
+        col = sample_annotation_colors,
+        annotation_height = unit(rep(2, ncol(cur_sample_annotation)), "mm"),
+        annotation_name_gp = gpar(fontsize = text_size),
+        show_legend = FALSE,
+        show_annotation_name = show_annotation_name
+    )
+
+    ## Group matched top annotation
+    top_annnotation <- list(
+        "TMB" = tmb_data,
+        "FGA" = fga_data
+    )
+
+    top_annotation_list <- list()
+    top_annotation_list[["TMB"]] <- tmb_data[sample_ids]
+    top_annotation_list[["FGA"]] <- fga_data[sample_ids]
+    top_annotation <- PrepareTopBarAnno(
+        top_annotation_list,
+        text_size = text_size,
+        title_size = title_size
+    )
+
+    row_cnv_gene_order <- rownames(cur_cnv_gene_mat)
+    row_cnv_cytoband_order <- rownames(cur_cnv_cytoband_mat)
+
+    ## CNV gene heatmap
+    ht_cnv_gene <- oncoPrint(
+        ht_mat,
+        alter_fun = alter_fun,
+        col = alteration_colors,
+        bottom_annotation = NULL,
+        top_annotation = NULL,
+        show_row_names = show_row_names,
+        row_names_side = row_names_side,
+        row_split = c(
+            rep("CNV_Gene", nrow(cur_cnv_gene_mat)),
+            rep("CNV_Cytoband", nrow(cur_cnv_cytoband_mat))
+        ),
+        # cluster_rows = FALSE,
+        row_names_gp = gpar(fontsize = text_size),
+        row_order = rownames(ht_mat),
+        show_column_names = FALSE,
+        show_heatmap_legend = FALSE,
+        show_pct = TRUE,
+        pct_digits = 0,
+        pct_side = pct_side,
+        pct_gp = gpar(fontsize = text_size)
+    )
+
+    colnames(ht_cnv_gene@matrix)
+    
+    ## CNV cytoband heatmap
+    ht_cnv_cytoband <- oncoPrint(
+        cur_cnv_cytoband_mat,
+        alter_fun = alter_fun,
+        col = alteration_colors,
+        bottom_annotation = bottom_annotation,
+        top_annotation = NULL,
+        show_row_names = show_row_names,
+        row_names_side = row_names_side,
+        row_names_gp = gpar(fontsize = text_size),
+        # row_order = row_cnv_cytoband_order,
+        show_column_names = FALSE,
+        show_heatmap_legend = FALSE,
+        show_pct = TRUE,
+        pct_digits = 0,
+        pct_side = pct_side,
+        pct_gp = gpar(fontsize = text_size)
+    )
+
+    ## Combine two heatmaps vertically
+    ht_list <- ht_cnv_gene %v% ht_cnv_cytoband
+
+    filename <- paste0(plot_date, "_figure3_", i)
+
+    width <- 12
+    height <- 12
+
+    img_type <- c(".pdf", ".png")
+    
+    for (img in img_type) {
+
+        file <- here(plot_dir, paste0(filename, img))
+
+        if (img == ".pdf") {
+
+            pdf(file, width = width, height = height)
+
+        } else if (img == ".png") {
+            
+            png(
+                file,
+                width = width, height = height, res = 600, units = "in",
+                fonts = "Arial"
+            )
+        }
+
+        ## Combine alteration legend with sample annotation legends
+        all_manual_legends <- c(
+            list(alteration_legend),
+            sample_annotation_legends
+        )
+
+        draw(
+            ht_list,
+            main_heatmap = 2,
+            ht_gap = unit(0.2, "cm"),
+
+            ## Heatmap legend
+            # show_heatmap_legend = TRUE,
+            # heatmap_legend_side = "bottom",
+
+            ## Annotation legend
+            # annotation_legend_side = "bottom",
+
+            merge_legends = TRUE,
+            legend_gap = unit(1, "cm"),
+            padding = unit(c(1, 1, 1, 1), "cm"),
+
+            ## Add all manual legends
+            heatmap_legend_list = all_manual_legends
+        )
+
+        dev.off()
+
+        message(
+            paste0("Saved oncoplot: ", file)
+        )
+    }
+}
+
+
+## Generate the heatmap list
+ht_list <- list()
+
+main_ht_idx <- which(sort_group_level == main_group)
+
+for (i in sort_group_level) {
+
+    ## Plot the CNV gene heatmap
+    ht_cnv_gene <- oncoPrint(
+        plot_data[[i]][["cnv_gene_mat"]],
+        alter_fun = alter_fun,
+        col = alteration_colors,
+        bottom_annotation = NULL,
+        top_annotation = plot_data[[i]][["top_annotation"]],
+        show_row_names = show_row_names,
+        row_names_side = row_names_side,
+        row_names_gp = gpar(fontsize = text_size),
+        # row_order = row_order,
+        show_column_names = FALSE,
+        # column_names_gp = gpar(fontsize = text_size),
+        # column_title_gp = gpar(fontsize = title_size),
+        show_heatmap_legend = FALSE,
+        show_pct = TRUE,
+        pct_digits = 0,
+        pct_side = pct_side,
+        pct_gp = gpar(fontsize = text_size)
+    )
+
+    ## Plot the CNV cytoband heatmap
+    ht_cnv_cytoband <- oncoPrint(
+        plot_data[[i]][["cnv_cytoband_mat"]],
+        alter_fun = alter_fun,
+        col = alteration_colors,
+        bottom_annotation = NULL,
+        top_annotation = NULL,
+        show_row_names = show_row_names,
+        row_names_side = row_names_side,
+        row_names_gp = gpar(fontsize = text_size),
+        # row_order = row_order,
+        show_column_names = TRUE,
+        column_names_gp = gpar(fontsize = text_size),
+        column_title_gp = gpar(fontsize = title_size),
+        show_heatmap_legend = FALSE,
+        show_pct = TRUE,
+        pct_digits = 0,
+        pct_side = pct_side,
+        pct_gp = gpar(fontsize = text_size)
+    )
+
+    ## Combine two heatmaps vertically
+    ht_list[[i]] <- ht_cnv_gene %v% ht_cnv_cytoband
+
+}
+ht_list[["U-DFSP"]] + ht_list[["Pre-FST"]]
+
+ht_combined <- Reduce(`+`, ht_list)
+
+heatmap_legend <- Legend(
+        labels = names(alteration_colors),
+        legend_gp = gpar(fill = alteration_colors),
+        title = "CNV Alteration",
+        title_gp = gpar(fontsize = title_size),
+        labels_gp = gpar(fontsize = text_size),
+        grid_height = unit(4, "mm"),
+        grid_width = unit(4, "mm")
+)
+
+mat_list <- list(
+    "CNV_Gene" = cnv_gene_mat,      # Your CNV gene matrix
+    "CNV_Cytoband" = cnv_cytoband_mat  # Your CNV cytoband matrix
+)
+
+ComplexGroupOncoplot(
+    mat = cnv_cytoband_mat,
+    is_somatic_matched = TRUE,
+    # split_by_group = "FST.Type",
+    split_by_group = "FST.Group",
+    sort_group_level = c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP"),
+    # sort_group_level = c("Classic", "FST"),
+    main_group = main_group,
+    sample_annotation = c("FST.Group", "Metastasis", "Specimen.Nature"),
+    column_title = paste0("Gistic2 CNV Cytoband", " - sort by ", main_group),
+    width = 18,
+    height = 12,
+    dir = "figures/oncoplot",
+    filename = paste0("gistic2_cnv_cytoband_sort_by_", main_group, "_frequency")
+)
+
+
 
 ## "==========================================================================="
 ## Oncoplot SNV/indels -----

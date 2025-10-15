@@ -5963,6 +5963,184 @@ PairedPatientGroupOncoplot <- function(
 
 }
 
+testDFSPComplexGroupOncoplot <- function(
+    mat_list,  # Changed from single 'mat' to list of matrices
+    is_somatic_matched = TRUE,
+    split_by_group = "FST.Group",
+    sort_group_level = c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP"),
+    main_group = "FS-DFSP",
+    row_order = NULL,
+    sample_annotation = c("FST.Group", "Metastasis"),
+    column_title = NULL,
+    title_size = 8,
+    text_size = 6,
+    width = 18,
+    height = 12,
+    dir = "figures/oncoplot",
+    filename = "oncoplot"
+) {
+    
+    ## Get matched clinical info
+    clinical_info <- LoadClinicalInfo(is_somatic_matched = is_somatic_matched) |> 
+        mutate(
+            FST.Type = case_when(
+                FST.Group  %in% c("U-DFSP", "Pre-FST") ~ "Classic",
+                FST.Group  %in% c("Post-FST", "FS-DFSP") ~ "FST",
+                TRUE ~ "Other"
+            )
+        )
+
+    ## Prepare the plot data for each heatmap
+    plot_data <- list()
+
+    for (i in sort_group_level) {
+
+        sample_ids <- clinical_info |> 
+            filter(!!sym(split_by_group) == i) |> 
+            pull(Sample.ID)
+
+        ## Process each matrix type for this group
+        plot_data[[i]][["mat_list"]] <- list()
+        for (mat_name in names(mat_list)) {
+            cur_mat <- mat_list[[mat_name]][, sample_ids, drop = FALSE]
+            plot_data[[i]][["mat_list"]][[mat_name]] <- cur_mat
+        }
+
+        ## Sample annotation
+        sample_idx <- match(sample_ids, clinical_info$Sample.ID)
+        cur_sample_annotation <- clinical_info[sample_idx, ] |> 
+            dplyr::select(Sample.ID, all_of(sample_annotation)) |> 
+            column_to_rownames("Sample.ID")
+        
+        plot_data[[i]][["sample_annotation"]] <- cur_sample_annotation
+    }
+    
+    ## Sample annotation colors
+    sample_annotation_colors <- list()
+    for (annotation in sample_annotation) {
+        sample_annotation_colors[[annotation]] <- study_colors[[annotation]]
+    }
+
+    ## Alteration colors and functions
+    alteration_colors <- study_colors$Alteration
+
+    alter_fun <- list(
+        background = alter_graphic("rect", fill = "#CCCCCC"),
+        AMP = alter_graphic("rect", width = 0.9, height = 0.9, fill = study_colors$Alteration[["AMP"]]),
+        GAIN = alter_graphic("rect", width = 0.9, height = 0.9, fill = study_colors$Alteration[["GAIN"]]),
+        HOMDEL = alter_graphic("rect", width = 0.9, height = 0.9, fill = study_colors$Alteration[["HOMDEL"]]),
+        DEL = alter_graphic("rect", width = 0.9, height = 0.9, fill = study_colors$Alteration[["DEL"]]),
+        SNV = alter_graphic("rect", width = 0.9, height = 0.3, fill = study_colors$Alteration[["SNV"]]),
+        substitution = alter_graphic("rect", width = 0.9, height = 0.3, fill = study_colors$Alteration[["substitution"]]),
+        insertion = alter_graphic("rect", width = 0.9, height = 0.5, fill = study_colors$Alteration[["insertion"]]),
+        deletion = alter_graphic("rect", width = 0.9, height = 0.5, fill = study_colors$Alteration[["deletion"]])
+    )
+
+    ## Generate the heatmap list (horizontal combination of groups)
+    ht_group_list <- list()
+    n_group <- length(sort_group_level)
+    main_ht_idx <- which(sort_group_level == main_group)
+    n_mat_types <- length(mat_list)
+
+    for (i in seq_along(sort_group_level)) {
+        group_name <- sort_group_level[i]
+        
+        ## Create vertical combination of matrices for this group
+        ht_mat_list <- list()
+        
+        for (j in seq_along(names(mat_list))) {
+            mat_name <- names(mat_list)[j]
+            
+            ## Determine display options
+            show_column_names <- (j == n_mat_types)  # Only show for bottom matrix
+            show_row_names <- (i == n_group)        # Only show for rightmost group
+            show_annotation_name <- (i == n_group && j == n_mat_types)  # Only for bottom-right
+            
+            ## Bottom annotation only for the last matrix of each group
+            if (j == n_mat_types) {
+                bottom_annotation <- HeatmapAnnotation(
+                    df = plot_data[[group_name]][["sample_annotation"]],
+                    col = sample_annotation_colors,
+                    annotation_height = unit(c(4, 4), "mm"),
+                    annotation_name_gp = gpar(fontsize = text_size),
+                    annotation_legend_param = list(
+                        labels_gp = gpar(fontsize = text_size),
+                        title_gp = gpar(fontsize = title_size)
+                    ),
+                    show_annotation_name = show_annotation_name
+                )
+            } else {
+                bottom_annotation <- NULL
+            }
+
+            ht_mat_list[[mat_name]] <- oncoPrint(
+                plot_data[[group_name]][["mat_list"]][[mat_name]],
+                alter_fun = alter_fun,
+                col = alteration_colors,
+                bottom_annotation = bottom_annotation,
+                show_row_names = show_row_names,
+                row_names_side = "right",
+                row_names_gp = gpar(fontsize = text_size),
+                row_order = row_order,
+                show_column_names = show_column_names,
+                column_names_gp = gpar(fontsize = text_size),
+                column_title_gp = gpar(fontsize = title_size),
+                show_heatmap_legend = FALSE,
+                show_pct = TRUE,
+                pct_digits = 0,
+                pct_side = "left",
+                pct_gp = gpar(fontsize = text_size)
+            )
+        }
+        
+        ## Combine matrices vertically for this group
+        ht_group_list[[group_name]] <- Reduce(`%v%`, ht_mat_list)
+    }
+
+    ## Combine groups horizontally
+    ht_combined <- Reduce(`+`, ht_group_list)
+    
+    ## Create legend
+    alteration_legend <- Legend(
+        labels = names(alteration_colors),
+        legend_gp = gpar(fill = alteration_colors),
+        title = "Alteration",
+        title_gp = gpar(fontsize = title_size),
+        labels_gp = gpar(fontsize = text_size),
+        grid_height = unit(4, "mm"),
+        grid_width = unit(4, "mm")
+    )
+
+    ## Save the oncoplot
+    dir_create(here(dir))
+    img_type <- c(".pdf", ".png")
+    
+    for (img in img_type) {
+        file <- here(dir, paste0(filename, img))
+        
+        if (img == ".pdf") {
+            pdf(file, width = width, height = height)
+        } else if (img == ".png") {
+            png(file, width = width, height = height, res = 600, units = "in")
+        }
+        
+        draw(
+            ht_combined, 
+            main_heatmap = main_ht_idx,
+            ht_gap = unit(0.2, "cm"),
+            column_title = column_title, 
+            column_title_gp = gpar(fontsize = title_size),
+            merge_legends = TRUE,
+            legend_gap = unit(1, "cm"),
+            padding = unit(c(1, 1, 1, 1), "cm"),
+            heatmap_legend_list = list(alteration_legend)
+        )
+        
+        dev.off()
+        message(paste0("Saved oncoplot: ", file))
+    }
+}
+
 ComplexGroupOncoplot <- function(
     mat,
     is_somatic_matched = TRUE,
@@ -6269,6 +6447,297 @@ ComplexGroupOncoplot <- function(
             labels = names(alteration_colors),
             legend_gp = gpar(fill = alteration_colors),
             title = "CNV Alteration",
+            title_gp = gpar(fontsize = title_size),
+            labels_gp = gpar(fontsize = text_size),
+            grid_height = unit(4, "mm"),
+            grid_width = unit(4, "mm")
+    )
+
+    ## Save the oncoplot
+    dir_create(here(dir))
+    img_type <- c(".pdf", ".png")
+    
+    for (img in img_type) {
+        
+        file <- here(dir, paste0(filename, img))
+        
+        if (img == ".pdf") {
+
+            # CairoPDF(file, width = width, height = height)
+            pdf(file, width = width, height = height)
+    
+        } else if (img == ".png") {
+    
+            # CairoPNG(
+            #     file, width = width, height = height, res = 300, units = "in",
+            #     fonts = "Arial"
+            # )
+            png(
+                file, width = width, height = height, res = 600, units = "in",
+                fonts = "Arial"
+            )
+        }
+        
+        draw(
+            ht_combined, 
+            main_heatmap = main_ht_idx,
+            ht_gap = unit(0.2, "cm"),
+
+            column_title = column_title, 
+            column_title_gp = gpar(fontsize = title_size),
+            ## Heatmap legend
+            # show_heatmap_legend = TRUE,
+            # heatmap_legend_side = "right",
+
+            ## Annotation legend
+            # annotation_legend_side = "bottom",
+        
+            merge_legends = TRUE,
+            legend_gap = unit(1, "cm"),
+            padding = unit(c(1, 1, 1, 1), "cm"),
+
+            ## Add manual heatmap legend
+            heatmap_legend_list = list(alteration_legend)
+        )
+        
+        dev.off()
+
+        message(
+            paste0("Saved oncoplot: ", file)
+        )
+    }
+
+}
+
+DFSPFigure3ComplexGroupOncoplot <- function(
+    mat,
+    is_somatic_matched = TRUE,
+    split_by_group = "FST.Group",
+    sort_group_level = c("U-DFSP", "Pre-FST", "Post-FST", "FS-DFSP"),
+    main_group = "FS-DFSP",
+    row_order = NULL,
+    sample_annotation = c("FST.Group", "Metastasis"),
+    show_bottom_annotation = TRUE,
+    show_column_names = TRUE,
+    show_top_annotation = TRUE,
+    top_bar_annotation = NULL,
+    row_names_side = "left",
+    pct_side = "right",
+    column_title = NULL,
+    title_size = 8,
+    text_size = 6,
+    width = 18,
+    height = 12,
+    dir = "figures/oncoplot",
+    filename = "oncoplot"
+) {
+    
+    ## Get matched clinical info
+    clinical_info <- LoadClinicalInfo(is_somatic_matched = is_somatic_matched) |> 
+        mutate(
+            FST.Type = case_when(
+                FST.Group  %in% c("U-DFSP", "Pre-FST") ~ "Classic",
+                FST.Group  %in% c("Post-FST", "FS-DFSP") ~ "FST",
+                TRUE ~ "Other"
+            )
+        )
+
+    ## Prepare the plot data for each heatmap
+    plot_data <- list()
+
+    for (i in sort_group_level) {
+
+        sample_ids <- clinical_info |> 
+            filter(!!sym(split_by_group) == i) |> 
+            pull(Sample.ID)
+
+        ## Matrix
+        cur_mat <- mat[, sample_ids, drop = FALSE]
+        plot_data[[i]][["mat"]] <- cur_mat
+
+        ## Sample annotation colors
+        sample_idx <- match(
+            colnames(cur_mat), 
+            clinical_info$Sample.ID
+        )
+
+        cur_sample_annotation <- clinical_info[sample_idx, ] |> 
+            dplyr::select(Sample.ID, all_of(sample_annotation)) |> 
+            column_to_rownames("Sample.ID")
+        
+        plot_data[[i]][["sample_annotation"]] <- cur_sample_annotation
+        
+        ## Calcualte the freq data
+        # cn_mat[]
+    }
+    
+    ## "---------------------------------------------------------------------"
+    ## Sample annotation colors
+    ## "---------------------------------------------------------------------"
+    sample_annotation_colors <- list()
+
+    for (annotation in sample_annotation) {
+        sample_annotation_colors[[annotation]] <- study_colors[[annotation]]
+    }
+
+    ## "---------------------------------------------------------------------"
+    ## Create the matrix annotation colors
+    ## "---------------------------------------------------------------------"
+    alteration_colors <- study_colors$Alteration
+
+    alter_fun <- list(
+        background = alter_graphic("rect", fill = "#CCCCCC"),
+        AMP = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["AMP"]]
+        ),
+        DEL = alter_graphic(
+            "rect", width = 0.9, height = 0.9,
+            fill = study_colors$Alteration[["DEL"]]
+        )
+    )
+    ## "===================================================================="
+    ## Heatmap matrix annotation legend ----
+    ## "===================================================================="
+    alteration_legend <- Legend(
+            labels = names(alter_fun)[-1],
+            
+            ## Custom graphics function to create rectangles with backgrounds and borders that match the heatmap
+            graphics = list(
+                # AMP - full size with background and border
+                function(x, y, w, h) {
+                    # Background (grey)
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(
+                            fill = "#CCCCCC", col = "white", lwd = 0.5
+                        )
+                    )
+                    # Foreground rectangle
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.9, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["AMP"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                },
+                # DEL - full size with background and border
+                function(x, y, w, h) {
+                    grid.rect(
+                        x, y, w, h, 
+                        gp = gpar(fill = "#CCCCCC", col = "white", lwd = 0.5)
+                    )
+                    grid.rect(
+                        x, y, w * 0.9, h * 0.9, 
+                        gp = gpar(
+                            fill = study_colors$Alteration[["DEL"]], 
+                            col = "white", lwd = 0.5
+                        )
+                    )
+                }
+            ),
+            title = "Alteration",
+            title_gp = gpar(fontsize = title_size),# fontface = "bold"
+            labels_gp = gpar(fontsize = text_size),
+            grid_height = unit(4, "mm"),
+            grid_width = unit(4, "mm"),
+            direction = "vertical"
+        )
+    
+    ## "---------------------------------------------------------------------"
+    ## Generate the heatmap list
+    ## "---------------------------------------------------------------------"
+    ht_list <- list()
+    n_group <- length(sort_group_level)
+    main_ht_idx <- which(sort_group_level == main_group)
+
+    for (i in seq_along(sort_group_level)) {
+
+        sample_ids <- clinical_info |> 
+            filter(!!sym(split_by_group) == sort_group_level[i]) |> 
+            pull(Sample.ID)
+
+        if (i == 1) {
+            
+            show_annotation_name <- TRUE
+            show_row_names <- TRUE
+            show_heatmap_legend <- TRUE
+
+        } else {
+
+            show_annotation_name <- FALSE
+            show_row_names <- FALSE
+            show_heatmap_legend <- FALSE
+        }
+        
+        if (show_bottom_annotation) {
+        
+            bottom_annotation <- HeatmapAnnotation(
+                    df = plot_data[[i]][["sample_annotation"]],
+                    col = sample_annotation_colors,
+                    annotation_height = unit(c(4, 4), "mm"),
+                    annotation_name_gp = gpar(fontsize = text_size),
+                    annotation_legend_param = list(
+                        labels_gp = gpar(fontsize = text_size),       # Legend text
+                        title_gp = gpar(fontsize = title_size)         # Legend title
+                    ),
+                    show_annotation_name = show_annotation_name
+            )
+
+        } else {
+
+            bottom_annotation <- NULL
+        }
+
+        if (show_top_annotation) {
+            
+            if (!is.null(top_bar_annotation)) {
+                
+                cur_top_annotation <- PrepareTopBarAnno(
+                    top_annotation,
+                    text_size = text_size,
+                    title_size = title_size
+                )
+
+            } else {
+
+                cur_top_annotation <- NULL
+            }
+        }
+
+        ht_list[[i]] <- oncoPrint(
+            plot_data[[i]][["mat"]],
+            alter_fun = alter_fun,
+            col = alteration_colors,
+            bottom_annotation = bottom_annotation,
+            top_annotation = cur_top_annotation,
+            show_row_names = show_row_names,
+            row_names_side = row_names_side,
+            row_names_gp = gpar(fontsize = text_size),
+            row_order = row_order,
+            show_column_names = show_column_names,
+            column_names_gp = gpar(fontsize = text_size),
+            column_title_gp = gpar(fontsize = title_size),
+            show_heatmap_legend = FALSE,
+            heatmap_legend_param = list(
+                # labels_gp = gpar(fontsize = text_size), 
+                title_gp = gpar(fontsize = title_size),
+                title = "Alteration"
+            ),
+            show_pct = TRUE,
+            pct_digits = 0,
+            pct_side = pct_side,
+            pct_gp = gpar(fontsize = text_size)
+        )
+    }
+
+    ht_combined <- Reduce(`+`, ht_list)
+    
+    heatmap_legend <- Legend(
+            labels = names(alteration_colors),
+            legend_gp = gpar(fill = alteration_colors),
+            title = "Alteration",
             title_gp = gpar(fontsize = title_size),
             labels_gp = gpar(fontsize = text_size),
             grid_height = unit(4, "mm"),
@@ -9280,4 +9749,109 @@ FacetCalculateFGA <- function(cnv_file, gain_threshold = 0.3, loss_threshold = -
         gain_segments = gain_segments,
         loss_segments = loss_segments
     ))
+}
+
+## Prepare the top barplot annotation
+PrepareTopBarAnno <- function(
+    top_annotation_list, 
+    text_size = 7,
+    title_size = 9
+) {
+
+    anno_list <- list()
+
+    for (anno_name in names(top_annotation_list)) {
+    
+        anno_data <- top_annotation_list[[anno_name]]
+
+        ## tick breaks
+        data_range <- range(anno_data, na.rm = TRUE)
+        data_max <- data_range[2]
+        data_min <- data_range[1]
+
+        # Create intelligent tick breaks
+        if (data_max <= 1) {
+            # For very small values, use finer steps
+            tick_breaks <- pretty(c(data_min, data_max), n = 4)
+        } else if (data_max <= 5) {
+            # For small values, use integers
+            tick_breaks <- pretty(c(data_min, data_max), n = 3)
+        } else if (data_max <= 50) {
+            # For medium values, use steps of 5 or 10
+            tick_breaks <- pretty(c(data_min, data_max), n = 4)
+        } else {
+            # For large values, use larger steps
+            tick_breaks <- pretty(c(data_min, data_max), n = 3)
+        }
+
+        # Ensure we include 0 and max
+        tick_breaks <- unique(c(0, tick_breaks[tick_breaks > 0]))
+        tick_breaks <- tick_breaks[tick_breaks <= data_max]
+
+        # Format labels appropriately
+        tick_labels <- ifelse(
+            tick_breaks == floor(tick_breaks),
+            as.character(as.integer(tick_breaks)),
+            sprintf("%.1f", tick_breaks)
+        )
+
+        anno_list[[anno_name]] <- anno_barplot(
+            anno_data,
+            height = unit(2, "cm"),
+            axis_param = list(
+                at = tick_breaks,
+                labels = tick_labels,
+                gp = gpar(fontsize = text_size)
+            ),
+            gp = gpar(fill = "gray50")
+        )
+    }
+
+    ## Combine multiple annotations
+    top_annotation <- do.call(
+        HeatmapAnnotation, 
+        c(
+            anno_list,
+            list(
+                annotation_name_gp = gpar(fontsize = text_size),
+                annotation_name_side = "left",
+                gap = unit(2, "mm")
+            )
+        )
+
+    )
+
+    return(top_annotation)
+}
+
+GetDFSPGroupRowOrder <- function(main_group, mat) {
+
+    clinical_info <- LoadClinicalInfo()
+    
+    ## According to the frequency in the main group
+    sample_ids <- clinical_info |> 
+        filter(!!sym("FST.Group") == main_group) |>
+        pull(Sample.ID)
+    
+    n_sample <- length(sample_ids)
+
+    ## Calcualte the frequency in the main group
+    freq_tbl <- as_tibble(
+        mat[, sample_ids, drop = FALSE], 
+        rownames = "variant"
+    ) |> 
+        pivot_longer(
+            cols = -variant,
+            names_to = "sample_id",
+            values_to = "alteration"
+        ) |> 
+        filter(alteration != "") |> 
+        group_by(variant) |> 
+        summarise(
+            freq = n()/n_sample,
+            .groups = "drop"
+        ) |> 
+        arrange(desc(freq))
+    
+    freq_tbl |> pull(variant)
 }
